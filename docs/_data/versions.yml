@@ -1,5 +1,0 @@
-current: auto
-items:
-  - title: Releases
-    url: https://github.com/crmne/kamal-backup/releases
-    external: true

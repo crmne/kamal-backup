@@ -1,8 +1,11 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-labelledby="title">
   <title id="title">kamal-backup</title>
-  <rect width="64" height="64" rx="14" fill="#2563eb"/>
-  <path d="M18 23c0-4.4 6.3-8 14-8s14 3.6 14 8v18c0 4.4-6.3 8-14 8s-14-3.6-14-8V23Z" fill="#dbeafe"/>
-  <path d="M46 23c0 4.4-6.3 8-14 8s-14-3.6-14-8" fill="none" stroke="#2563eb" stroke-width="4"/>
-  <path d="M18 32c0 4.4 6.3 8 14 8s14-3.6 14-8" fill="none" stroke="#2563eb" stroke-width="4"/>
-  <path d="M42 42l6 6 8-11" fill="none" stroke="#22c55e" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>
+  <!-- Kamal "K" mark adapted from https://kamal-deploy.org/assets/images/favicon.svg -->
+  <rect width="64" height="64" rx="14" fill="#0a82f5"/>
+  <path d="M16 52V12h12.534v18.857L37.464 12h14.251L41.298 31.829 52 52H37.405l-8.871-19.2V52Z" fill="#fff"/>
+  <circle cx="47" cy="47" r="13" fill="#0f172a"/>
+  <path d="M53.5 45.4a6.8 6.8 0 0 0-12.2-2.8" fill="none" stroke="#fff" stroke-linecap="round" stroke-width="3"/>
+  <path d="M39.5 42.4h4.4v4.4" fill="none" stroke="#fff" stroke-linecap="round" stroke-linejoin="round" stroke-width="3"/>
+  <path d="M40.5 48.6a6.8 6.8 0 0 0 12.2 2.8" fill="none" stroke="#fff" stroke-linecap="round" stroke-width="3"/>
+  <path d="M54.5 51.6h-4.4v-4.4" fill="none" stroke="#fff" stroke-linecap="round" stroke-linejoin="round" stroke-width="3"/>
 </svg>

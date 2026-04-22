@@ -2,6 +2,8 @@ title: kamal-backup
 description: Kamal-first encrypted backups for databases and mounted app files using restic.
 lang: en-US
 timezone: Europe/Berlin
+url: https://crmne.github.io
+baseurl: /kamal-backup
 
 markdown: kramdown
 kramdown:
@@ -61,9 +63,9 @@ jekyll_vitepress:
     enabled: true
     show_on_docs: false
     message: >-
-      Docs built with <a href="https://jekyll-vitepress.dev" target="_blank" rel="noreferrer">Jekyll VitePress</a>.
+      Brought to you by <a href="https://paolino.me" target="_blank" rel="noreferrer">Carmine Paolino</a>, maker of
     copyright: >-
-      <a href="https://github.com/crmne/kamal-backup" target="_blank" rel="noreferrer">kamal-backup on GitHub</a>
+      <span class="footer-brand-links"><a href="https://chatwithwork.com" class="footer-chatwithwork-link" target="_blank" rel="noreferrer"><img class="footer-chatwithwork-logo" src="https://chatwithwork.com/logotype.svg" alt="Chat with Work"></a><a href="https://rubyllm.com" class="footer-rubyllm-link" target="_blank" rel="noreferrer"><img class="footer-rubyllm-logo theme-image light" src="https://rubyllm.com/assets/images/logotype.svg" alt="RubyLLM"><img class="footer-rubyllm-logo theme-image dark" src="https://rubyllm.com/assets/images/logotype_dark.svg" alt="RubyLLM"></a></span><br><span class="footer-built-with">Docs built with <a href="https://jekyll-vitepress.dev" target="_blank" rel="noreferrer">Jekyll VitePress</a>.</span>
   doc_footer:
     enabled: true
     previous_label: Previous page

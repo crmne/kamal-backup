@@ -23,18 +23,16 @@ hero:
     width: 256
     height: 256
 features:
-  - icon: DB
+  - icon: 🗄️
     title: Logical Database Dumps
     details: PostgreSQL, MySQL/MariaDB, and SQLite backups use dump tools instead of raw database directories.
-  - icon: FS
+  - icon: 📁
     title: Mounted File Backups
     details: Back up Rails Active Storage and other mounted paths with restic path snapshots.
-  - icon: OK
+  - icon: 🔒
     title: Restore Safety Gates
     details: Restore commands require explicit environment flags and restore-specific database targets.
-  - icon: EV
+  - icon: ✅
     title: Audit Evidence
     details: Generate redacted operational evidence for backup readiness and security reviews.
 ---
-
-`kamal-backup` runs as a Kamal accessory and defaults to a foreground scheduler, so backup logs are visible through `kamal accessory logs`.
