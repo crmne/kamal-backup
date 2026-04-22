@@ -63,7 +63,9 @@ jobs:
 
   gem:
     runs-on: ubuntu-latest
-    needs: test
+    needs: [test, image]
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v4
 
@@ -98,6 +100,7 @@ jobs:
           fi
 
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "tag=v$VERSION" >> "$GITHUB_OUTPUT"
           echo "Local version: $VERSION"
 
           GEM_NAME="kamal-backup"
@@ -139,6 +142,39 @@ jobs:
           }
         env:
           GEM_HOST_API_KEY: "${{ secrets.RUBYGEMS_AUTH_TOKEN }}"
+          VERSION: ${{ steps.check_version.outputs.version }}
+
+      - name: Create GitHub release
+        if: github.event_name != 'pull_request' && github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+        run: |
+          set -euo pipefail
+
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "GitHub release $TAG already exists."
+            exit 0
+          fi
+
+          prerelease_args=()
+          if ruby -rrubygems/version -e "exit Gem::Version.new(ARGV.fetch(0)).prerelease? ? 0 : 1" "$VERSION"; then
+            prerelease_args=(--prerelease)
+          fi
+
+          cat > release-notes.md <<NOTES
+          Release $TAG of kamal-backup.
+
+          Gem: https://rubygems.org/gems/kamal-backup/versions/$VERSION
+          Image: ghcr.io/crmne/kamal-backup:$VERSION
+          Docs: https://kamal-backup.dev
+          NOTES
+
+          gh release create "$TAG" \
+            --target "$GITHUB_SHA" \
+            --title "$TAG" \
+            --notes-file release-notes.md \
+            "${prerelease_args[@]}"
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ steps.check_version.outputs.tag }}
           VERSION: ${{ steps.check_version.outputs.version }}
 
   docs:
