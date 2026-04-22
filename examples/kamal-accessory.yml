@@ -1,6 +1,6 @@
 accessories:
   backup:
-    image: ghcr.io/USER/kamal-backup:latest
+    image: ghcr.io/crmne/kamal-backup:latest
     host: chatwithwork.com
     env:
       clear:

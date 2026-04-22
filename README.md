@@ -28,7 +28,7 @@ Add a backup accessory to your Kamal deploy config:
 ```yaml
 accessories:
   backup:
-    image: ghcr.io/USER/kamal-backup:latest
+    image: ghcr.io/crmne/kamal-backup:latest
     host: chatwithwork.com
     env:
       clear:
@@ -237,6 +237,24 @@ Build the image:
 
 ```sh
 docker build -t kamal-backup .
+```
+
+CI publishes container images to `ghcr.io/crmne/kamal-backup`. Pull requests build the image without pushing; branch, tag, SHA, and default-branch `latest` tags are pushed on non-PR builds.
+
+The CLI is packaged as the `kamal-backup` gem. The Docker image builds and installs that gem, which is why `kamal-backup` is on `PATH` inside the container.
+
+For local Ruby use:
+
+```sh
+gem build kamal-backup.gemspec
+gem install ./kamal-backup-*.gem
+kamal-backup --help
+```
+
+In normal Kamal use, you do not need to install the gem on the app host. Run the command inside the accessory:
+
+```sh
+bin/kamal accessory exec backup "kamal-backup evidence"
 ```
 
 Run a local backup against a filesystem restic repository:
