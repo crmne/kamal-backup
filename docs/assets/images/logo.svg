@@ -1,11 +1,110 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-labelledby="title">
-  <title id="title">kamal-backup</title>
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<svg
+   viewBox="0 0 64 64"
+   role="img"
+   aria-labelledby="title"
+   version="1.1"
+   id="svg9"
+   sodipodi:docname="logo.svg"
+   inkscape:version="1.4.3 (0d15f75042, 2025-12-25)"
+   xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape"
+   xmlns:sodipodi="http://sodipodi.sourceforge.net/DTD/sodipodi-0.dtd"
+   xmlns="http://www.w3.org/2000/svg"
+   xmlns:svg="http://www.w3.org/2000/svg">
+  <defs
+     id="defs9" />
+  <sodipodi:namedview
+     id="namedview9"
+     pagecolor="#ffffff"
+     bordercolor="#000000"
+     borderopacity="0.25"
+     inkscape:showpageshadow="2"
+     inkscape:pageopacity="0.0"
+     inkscape:pagecheckerboard="0"
+     inkscape:deskcolor="#d1d1d1"
+     inkscape:zoom="2.2129072"
+     inkscape:cx="52.193784"
+     inkscape:cy="65.524664"
+     inkscape:window-width="960"
+     inkscape:window-height="566"
+     inkscape:window-x="0"
+     inkscape:window-y="0"
+     inkscape:window-maximized="1"
+     inkscape:current-layer="g9" />
+  <title
+     id="title">kamal-backup</title>
   <!-- Kamal "K" mark adapted from https://kamal-deploy.org/assets/images/favicon.svg -->
-  <rect width="64" height="64" rx="14" fill="#0a82f5"/>
-  <path d="M16 52V12h12.534v18.857L37.464 12h14.251L41.298 31.829 52 52H37.405l-8.871-19.2V52Z" fill="#fff"/>
-  <circle cx="47" cy="47" r="13" fill="#0f172a"/>
-  <path d="M53.5 45.4a6.8 6.8 0 0 0-12.2-2.8" fill="none" stroke="#fff" stroke-linecap="round" stroke-width="3"/>
-  <path d="M39.5 42.4h4.4v4.4" fill="none" stroke="#fff" stroke-linecap="round" stroke-linejoin="round" stroke-width="3"/>
-  <path d="M40.5 48.6a6.8 6.8 0 0 0 12.2 2.8" fill="none" stroke="#fff" stroke-linecap="round" stroke-width="3"/>
-  <path d="M54.5 51.6h-4.4v-4.4" fill="none" stroke="#fff" stroke-linecap="round" stroke-linejoin="round" stroke-width="3"/>
+  <rect
+     width="64"
+     height="64"
+     rx="14"
+     fill="#0a82f5"
+     id="rect1" />
+  <path
+     d="M16 52V12h12.534v18.857L37.464 12h14.251L41.298 31.829 52 52H37.405l-8.871-19.2V52Z"
+     fill="#fff"
+     id="path1" />
+  <g
+     transform="translate(33.25 33.25) scale(1.1)"
+     fill="none"
+     stroke-linecap="round"
+     stroke-linejoin="round"
+     id="g9">
+    <g
+       id="g11"
+       style="stroke:#000000;stroke-opacity:1">
+      <path
+         d="M4 6v6s0 3 7 3c.593 0 1.135-.021 1.631-.061"
+         stroke="#fff"
+         stroke-width="1.55"
+         id="path2"
+         style="stroke:#000000;stroke-opacity:1" />
+      <path
+         d="M18 6v6"
+         stroke="#fff"
+         stroke-width="1.55"
+         id="path3"
+         style="stroke:#000000;stroke-opacity:1" />
+      <path
+         d="M11 3c7 0 7 3 7 3s0 3-7 3-7-3-7-3 0-3 7-3Z"
+         stroke="#fff"
+         stroke-width="1.55"
+         id="path4"
+         style="stroke:#000000;stroke-opacity:1" />
+      <path
+         d="M11 21c-7 0-7-3-7-3v-6"
+         stroke="#fff"
+         stroke-width="1.55"
+         id="path5"
+         style="stroke:#000000;stroke-opacity:1" />
+    </g>
+    <g
+       id="g10"
+       style="stroke:#000000;stroke-opacity:1">
+      <path
+         d="M15.334 20.333C15.952 21.903 17.365 23 19.01 23c1.758 0 3.252-1.255 3.793-3"
+         stroke="#67e8f9"
+         stroke-width="1.6"
+         id="path8"
+         style="stroke:#000000;stroke-opacity:1" />
+      <path
+         d="M17.005 20.333h-1.671a.334.334 0 0 0-.334.334v1.889"
+         stroke="#67e8f9"
+         stroke-width="1.6"
+         id="path9"
+         style="stroke:#000000;stroke-opacity:1" />
+      <path
+         d="M20.995 17.667h1.671c.185 0 .334-.15.334-.334v-1.888"
+         stroke="#67e8f9"
+         stroke-width="1.6"
+         id="path7"
+         style="stroke:#000000;stroke-opacity:1" />
+      <path
+         d="M22.666 17.667C22.048 16.097 20.635 15 18.99 15c-1.758 0-3.252 1.255-3.793 3"
+         stroke="#67e8f9"
+         stroke-width="1.6"
+         id="path6"
+         style="stroke:#000000;stroke-opacity:1" />
+    </g>
+  </g>
 </svg>
