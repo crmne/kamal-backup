@@ -1,0 +1,42 @@
+services:
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_DB: app_test
+      POSTGRES_USER: app
+      POSTGRES_PASSWORD: secret
+    ports:
+      - "15432:5432"
+
+  mariadb:
+    image: mariadb:11
+    environment:
+      MARIADB_DATABASE: app_test
+      MARIADB_USER: app
+      MARIADB_PASSWORD: secret
+      MARIADB_ROOT_PASSWORD: root-secret
+    ports:
+      - "13306:3306"
+
+  backup:
+    build:
+      context: ..
+    depends_on:
+      - postgres
+      - mariadb
+    environment:
+      APP_NAME: compose-app
+      DATABASE_ADAPTER: postgres
+      DATABASE_URL: postgres://app@postgres:5432/app_test
+      PGPASSWORD: secret
+      BACKUP_PATHS: /data/storage
+      RESTIC_REPOSITORY: /restic-repo
+      RESTIC_PASSWORD: local-dev-password
+      RESTIC_INIT_IF_MISSING: "true"
+      BACKUP_SCHEDULE_SECONDS: "86400"
+    volumes:
+      - restic-repo:/restic-repo
+      - ./sample-storage:/data/storage:ro
+
+volumes:
+  restic-repo:

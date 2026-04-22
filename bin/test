@@ -1,0 +1,9 @@
+#!/usr/bin/env ruby
+
+$LOAD_PATH.unshift(File.expand_path("../lib", __dir__))
+$LOAD_PATH.unshift(File.expand_path("../test", __dir__))
+
+test_files = Dir[File.expand_path("../test/**/*_test.rb", __dir__)].sort
+abort("No test files found") if test_files.empty?
+
+test_files.each { |file| require file }

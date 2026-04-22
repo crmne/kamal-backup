@@ -1,0 +1,20 @@
+accessories:
+  backup:
+    image: ghcr.io/USER/kamal-backup:latest
+    host: chatwithwork.com
+    env:
+      clear:
+        APP_NAME: chatwithwork
+        DATABASE_ADAPTER: postgres
+        DATABASE_URL: postgres://chatwithwork@chatwithwork-db:5432/chatwithwork_production
+        BACKUP_PATHS: /data/storage
+        RESTIC_REPOSITORY: s3:https://s3.example.com/chatwithwork-backups
+        RESTIC_INIT_IF_MISSING: "true"
+        BACKUP_SCHEDULE_SECONDS: "86400"
+      secret:
+        - PGPASSWORD
+        - RESTIC_PASSWORD
+        - AWS_ACCESS_KEY_ID
+        - AWS_SECRET_ACCESS_KEY
+    volumes:
+      - "chatwithwork_storage:/data/storage:ro"
