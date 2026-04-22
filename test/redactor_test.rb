@@ -9,6 +9,14 @@ class RedactorTest < Minitest::Test
     assert_equal "postgres://[REDACTED]@db.example/app", value
   end
 
+  def test_redacts_url_credentials_when_password_contains_at
+    redactor = KamalBackup::Redactor.new(env: {})
+
+    value = redactor.redact_string("rest:https://backup:abc@def@backup.paolino.me/prod")
+
+    assert_equal "rest:https://[REDACTED]@backup.paolino.me/prod", value
+  end
+
   def test_redacts_query_secrets
     redactor = KamalBackup::Redactor.new(env: {})
 

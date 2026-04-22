@@ -43,7 +43,7 @@ module KamalBackup
     end
 
     def redact_url_credentials(value)
-      value.gsub(%r{(://)([^/\s:@]+)(?::([^/\s@]*))?@}) do
+      value.gsub(%r{(://)([^/\s]+)@}) do
         "#{$1}#{REDACTED}@"
       end.gsub(/([?&](?:password|token|secret|key|access_key_id|secret_access_key)=)[^&\s]+/i) do
         "#{$1}#{REDACTED}"
