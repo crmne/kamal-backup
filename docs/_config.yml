@@ -2,8 +2,6 @@ title: kamal-backup
 description: Kamal-first encrypted backups for databases and mounted app files using restic.
 lang: en-US
 timezone: Europe/Berlin
-url: https://crmne.github.io
-baseurl: /kamal-backup
 
 markdown: kramdown
 kramdown:
