@@ -1,7 +1,7 @@
 ---
 title: Evidence for Security Reviews
 description: Use the evidence command, restore drills, and restic checks to prepare for CASA and other security assessments.
-nav_order: 5
+nav_order: 6
 ---
 
 `kamal-backup evidence` exists for the moment when someone asks, "Show me how backups are configured today."
@@ -44,7 +44,7 @@ A practical workflow looks like this:
 
 1. Run backups on a schedule.
 2. Run `kamal-backup check` on a schedule, or enable `RESTIC_CHECK_AFTER_BACKUP=true`.
-3. Run `kamal-backup drill` against a non-production target.
+3. Run `kamal-backup drill production` against a scratch target, or `kamal-backup drill local` for a smaller app.
 4. Keep a short human note when you want operator context beyond the drill JSON:
    date, operator, snapshot restored, target used, and whether the app data looked correct.
 5. Run `kamal-backup evidence` and include the JSON with the review packet.
@@ -80,5 +80,5 @@ Avoid generic phrases like "we have backups." Say something concrete instead:
 - backups run from a dedicated Kamal accessory
 - PostgreSQL, MySQL/MariaDB, or SQLite are backed up with database-native export tools
 - file-backed Active Storage is backed up from mounted volumes
-- restores require explicit flags and restore-specific targets
+- restores are explicit, prompted operations with separate local and production-side drill flows
 - the team runs restore drills and keeps evidence output

@@ -51,10 +51,6 @@ module KamalBackup
       value("RESTIC_CHECK_READ_DATA_SUBSET")
     end
 
-    def allow_restore?
-      truthy?("KAMAL_BACKUP_ALLOW_RESTORE")
-    end
-
     def allow_production_restore?
       truthy?("KAMAL_BACKUP_ALLOW_PRODUCTION_RESTORE")
     end
@@ -157,11 +153,9 @@ module KamalBackup
       validate_backup_paths
     end
 
-    def validate_local_restore
-      validate_restic
-      validate_restore_allowed
-      validate_local_restore_environment
-      validate_local_restore_paths
+    def validate_local_machine_restore
+      validate_local_machine_environment
+      validate_local_machine_paths
     end
 
     def validate_database_backup
@@ -192,12 +186,6 @@ module KamalBackup
           raise ConfigurationError, "refusing suspicious backup path #{expanded}; set KAMAL_BACKUP_ALLOW_SUSPICIOUS_PATHS=true to override"
         end
         raise ConfigurationError, "backup path does not exist: #{path}" unless File.exist?(path)
-      end
-    end
-
-    def validate_restore_allowed
-      unless allow_restore?
-        raise ConfigurationError, "restore commands require KAMAL_BACKUP_ALLOW_RESTORE=true"
       end
     end
 
@@ -261,17 +249,17 @@ module KamalBackup
     end
 
     private
-      def validate_local_restore_environment
+      def validate_local_machine_environment
         if environment = local_restore_environment
           key, value = environment
 
           if production_environment?(value) && !allow_production_restore?
-            raise ConfigurationError, "restore-local refuses to run with #{key}=#{value}; set KAMAL_BACKUP_ALLOW_PRODUCTION_RESTORE=true to override"
+            raise ConfigurationError, "restore local refuses to run with #{key}=#{value}; set KAMAL_BACKUP_ALLOW_PRODUCTION_RESTORE=true to override"
           end
         end
       end
 
-      def validate_local_restore_paths
+      def validate_local_machine_paths
         path_pairs = local_restore_path_pairs
         raise ConfigurationError, "BACKUP_PATHS must contain at least one path" if path_pairs.empty?
 

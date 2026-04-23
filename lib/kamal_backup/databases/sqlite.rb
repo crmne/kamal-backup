@@ -34,9 +34,13 @@ module KamalBackup
         restic.write_dump_to_path(snapshot, filename, restore_target)
       end
 
-      def restore_local(restic, snapshot, filename)
-        validate_local_restore_target
+      def restore_to_current(restic, snapshot, filename)
         restic.write_dump_to_path(snapshot, filename, sqlite_source)
+      end
+
+      def restore_to_scratch(restic, snapshot, filename, target:)
+        validate_scratch_restore_target(target)
+        restic.write_dump_to_path(snapshot, filename, target)
       end
 
       def dump_command
@@ -51,8 +55,12 @@ module KamalBackup
         restore_target
       end
 
-      def local_restore_target_identifier
+      def current_target_identifier
         sqlite_source
+      end
+
+      def scratch_target_identifier(target)
+        target
       end
 
       private
@@ -74,8 +82,12 @@ module KamalBackup
           super
         end
 
-        def validate_local_restore_target
-          config.validate_local_database_restore_target(local_restore_target_identifier)
+        def validate_scratch_restore_target(target)
+          if File.expand_path(sqlite_source) == File.expand_path(target)
+            raise ConfigurationError, "scratch SQLite path must differ from SQLITE_DATABASE_PATH"
+          end
+
+          super
         end
 
         def sqlite_literal(value)

@@ -108,3 +108,28 @@ BACKUP_START_DELAY_SECONDS=0
 RESTIC_CHECK_AFTER_BACKUP=false
 RESTIC_CHECK_READ_DATA_SUBSET=5%
 ```
+
+## Local restore settings
+
+`restore local` and `drill local` use the same core environment as backups:
+
+- `RESTIC_REPOSITORY`
+- `RESTIC_PASSWORD`
+- `DATABASE_URL` or `SQLITE_DATABASE_PATH`
+- `BACKUP_PATHS`
+
+If the production file paths differ from the local ones, add:
+
+```sh
+LOCAL_RESTORE_SOURCE_PATHS=/data/storage
+```
+
+That tells `kamal-backup` which paths to look for inside the restored file snapshot before replacing your local `BACKUP_PATHS`.
+
+Rare override:
+
+```sh
+KAMAL_BACKUP_ALLOW_PRODUCTION_RESTORE=true
+```
+
+That bypasses the guard that refuses production-looking local targets.

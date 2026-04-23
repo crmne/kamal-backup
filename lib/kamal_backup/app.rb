@@ -47,7 +47,6 @@ module KamalBackup
 
     def restore_database(snapshot = "latest")
       config.validate_restic
-      config.validate_restore_allowed
 
       perform_database_restore(snapshot)
       true
@@ -55,59 +54,72 @@ module KamalBackup
 
     def restore_files(snapshot = "latest", target: "/restore/files")
       config.validate_restic
-      config.validate_restore_allowed
 
       perform_file_restore(snapshot, target: target)
       true
     end
 
     def restore_local(snapshot = "latest")
-      config.validate_local_restore
-
-      perform_database_restore(snapshot, local: true)
-      perform_local_file_restore(snapshot)
-      true
+      restore_to_local_machine(snapshot)
     end
 
-    def drill(snapshot = "latest", local: false, check_command: nil, file_target: "/restore/files")
-      started_at = Time.now.utc
-      result = {
-        status: "ok",
-        mode: local ? "local" : "targeted",
-        operator: drill_operator,
-        requested_snapshot: snapshot,
-        started_at: started_at.iso8601
-      }
+    def restore_to_local_machine(snapshot = "latest")
+      validate_local_machine_restore
 
-      begin
-        if local
-          config.validate_local_restore
-          result[:database] = perform_database_restore(snapshot, local: true)
-          result[:files] = perform_local_file_restore(snapshot)
-        else
-          config.validate_restic
-          config.validate_restore_allowed
-          result[:database] = perform_database_restore(snapshot)
-          result[:files] = perform_file_restore(snapshot, target: file_target)
-        end
-
-        if check_command
-          result[:check] = run_drill_check(check_command)
-
-          if result[:check][:status] == "failed"
-            result[:status] = "failed"
-            result[:error] = result[:check][:error]
-          end
-        end
-      rescue StandardError => e
-        result[:status] = "failed"
-        result[:error] = redactor.redact_string(e.message)
-      ensure
-        result[:finished_at] = Time.now.utc.iso8601
-        write_last_restore_drill(result)
+      build_restore_result("local", snapshot) do |result|
+        adapter = database
+        validate_local_machine_database_target(adapter)
+        result[:database] = perform_database_restore_to_current(snapshot, adapter: adapter)
+        result[:files] = perform_replacement_file_restore(
+          snapshot,
+          source_paths: config.local_restore_source_paths,
+          target_paths: config.backup_paths
+        )
       end
+    end
 
-      result
+    def restore_to_production(snapshot = "latest")
+      validate_production_restore
+
+      build_restore_result("production", snapshot) do |result|
+        adapter = database
+        result[:database] = perform_database_restore_to_current(snapshot, adapter: adapter)
+        result[:files] = perform_replacement_file_restore(
+          snapshot,
+          source_paths: config.backup_paths,
+          target_paths: config.backup_paths
+        )
+      end
+    end
+
+    def drill_on_local_machine(snapshot = "latest", check_command: nil)
+      validate_local_machine_restore
+
+      run_drill("local", snapshot, check_command: check_command) do |result|
+        adapter = database
+        validate_local_machine_database_target(adapter)
+        result[:database] = perform_database_restore_to_current(snapshot, adapter: adapter)
+        result[:files] = perform_replacement_file_restore(
+          snapshot,
+          source_paths: config.local_restore_source_paths,
+          target_paths: config.backup_paths
+        )
+      end
+    end
+
+    def drill_on_production(snapshot = "latest", database_name: nil, sqlite_path: nil, file_target: "/restore/files", check_command: nil)
+      validate_production_drill(file_target, database_name, sqlite_path)
+
+      run_drill("production", snapshot, check_command: check_command) do |result|
+        adapter = database
+        result[:database] = perform_database_restore_to_scratch(
+          snapshot,
+          adapter: adapter,
+          database_name: database_name,
+          sqlite_path: sqlite_path
+        )
+        result[:files] = perform_file_restore(snapshot, target: file_target)
+      end
     end
 
     def drill_failed?(result)
@@ -141,24 +153,86 @@ module KamalBackup
         Time.now.utc.strftime("%Y%m%dT%H%M%SZ")
       end
 
-      def perform_database_restore(snapshot, local: false)
+      def build_restore_result(mode, snapshot)
+        started_at = Time.now.utc
+        result = {
+          status: "ok",
+          action: "restore",
+          mode: mode,
+          requested_snapshot: snapshot,
+          started_at: started_at.iso8601
+        }
+        yield(result)
+        result[:finished_at] = Time.now.utc.iso8601
+        result
+      end
+
+      def run_drill(mode, snapshot, check_command:)
+        started_at = Time.now.utc
+        result = {
+          status: "ok",
+          action: "drill",
+          mode: mode,
+          operator: drill_operator,
+          requested_snapshot: snapshot,
+          started_at: started_at.iso8601
+        }
+
+        begin
+          yield(result)
+
+          if check_command
+            result[:check] = run_drill_check(check_command)
+
+            if result[:check][:status] == "failed"
+              result[:status] = "failed"
+              result[:error] = result[:check][:error]
+            end
+          end
+        rescue StandardError => e
+          result[:status] = "failed"
+          result[:error] = redactor.redact_string(e.message)
+        ensure
+          result[:finished_at] = Time.now.utc.iso8601
+          write_last_restore_drill(result)
+        end
+
+        result
+      end
+
+      def perform_database_restore(snapshot)
         adapter = database
         resolved_snapshot = resolve_snapshot(snapshot, tags: ["type:database", "adapter:#{adapter.adapter_name}"])
         filename = restic.database_file(resolved_snapshot, adapter.adapter_name)
 
         if filename
-          if local
-            adapter.restore_local(restic, resolved_snapshot, filename)
-          else
-            adapter.restore(restic, resolved_snapshot, filename)
-          end
+          adapter.restore(restic, resolved_snapshot, filename)
+          summarize_database_restore(adapter, resolved_snapshot, filename, adapter.restore_target_identifier)
+        else
+          raise ConfigurationError, "could not find database backup file in snapshot #{resolved_snapshot}"
+        end
+      end
 
-          {
-            snapshot: resolved_snapshot,
-            adapter: adapter.adapter_name,
-            filename: filename,
-            target: restore_database_target(adapter, local: local)
-          }
+      def perform_database_restore_to_current(snapshot, adapter:)
+        resolved_snapshot = resolve_snapshot(snapshot, tags: ["type:database", "adapter:#{adapter.adapter_name}"])
+        filename = restic.database_file(resolved_snapshot, adapter.adapter_name)
+
+        if filename
+          adapter.restore_to_current(restic, resolved_snapshot, filename)
+          summarize_database_restore(adapter, resolved_snapshot, filename, adapter.current_target_identifier)
+        else
+          raise ConfigurationError, "could not find database backup file in snapshot #{resolved_snapshot}"
+        end
+      end
+
+      def perform_database_restore_to_scratch(snapshot, adapter:, database_name:, sqlite_path:)
+        target = scratch_database_target(adapter, database_name, sqlite_path)
+        resolved_snapshot = resolve_snapshot(snapshot, tags: ["type:database", "adapter:#{adapter.adapter_name}"])
+        filename = restic.database_file(resolved_snapshot, adapter.adapter_name)
+
+        if filename
+          adapter.restore_to_scratch(restic, resolved_snapshot, filename, target: target)
+          summarize_database_restore(adapter, resolved_snapshot, filename, adapter.scratch_target_identifier(target))
         else
           raise ConfigurationError, "could not find database backup file in snapshot #{resolved_snapshot}"
         end
@@ -175,27 +249,27 @@ module KamalBackup
         }
       end
 
-      def perform_local_file_restore(snapshot)
+      def perform_replacement_file_restore(snapshot, source_paths:, target_paths:)
         resolved_snapshot = resolve_snapshot(snapshot, tags: ["type:files"])
         Dir.mktmpdir("kamal-backup-restore-") do |stage_dir|
           restic.restore_snapshot(resolved_snapshot, stage_dir)
-          replace_local_backup_paths(stage_dir)
+          replace_target_paths(stage_dir, source_paths: source_paths, target_paths: target_paths)
         end
 
         {
           snapshot: resolved_snapshot,
-          source_paths: config.local_restore_source_paths,
-          target_paths: config.backup_paths
+          source_paths: source_paths,
+          target_paths: target_paths.map { |path| File.expand_path(path) }
         }
       end
 
-      def replace_local_backup_paths(stage_dir)
-        config.local_restore_path_pairs.each do |source_path, target_path|
-          replace_local_backup_path(stage_dir, source_path, target_path)
+      def replace_target_paths(stage_dir, source_paths:, target_paths:)
+        source_paths.zip(target_paths).each do |source_path, target_path|
+          replace_target_path(stage_dir, source_path, target_path)
         end
       end
 
-      def replace_local_backup_path(stage_dir, source_path, target_path)
+      def replace_target_path(stage_dir, source_path, target_path)
         source = staged_backup_path(stage_dir, source_path)
         target = File.expand_path(target_path)
 
@@ -212,14 +286,51 @@ module KamalBackup
         File.join(stage_dir, path.to_s.sub(%r{\A/+}, ""))
       end
 
-      def restore_database_target(adapter, local:)
-        target = if local
-          adapter.local_restore_target_identifier
-        else
-          adapter.restore_target_identifier
-        end
+      def summarize_database_restore(adapter, snapshot, filename, target)
+        {
+          snapshot: snapshot,
+          adapter: adapter.adapter_name,
+          filename: filename,
+          target: redactor.redact_string(target.to_s)
+        }
+      end
 
-        redactor.redact_string(target.to_s)
+      def scratch_database_target(adapter, database_name, sqlite_path)
+        case adapter.adapter_name
+        when "sqlite"
+          sqlite_path || raise(ConfigurationError, "scratch SQLite path is required")
+        else
+          database_name || raise(ConfigurationError, "scratch database name is required")
+        end
+      end
+
+      def validate_local_machine_restore
+        config.validate_restic
+        config.validate_database_backup
+        config.validate_local_machine_restore
+      end
+
+      def validate_production_restore
+        config.validate_restic
+        config.validate_database_backup
+        config.validate_backup_paths
+      end
+
+      def validate_production_drill(file_target, database_name, sqlite_path)
+        config.validate_restic
+        config.validate_database_backup
+        config.validate_file_restore_target(file_target)
+
+        case database.adapter_name
+        when "sqlite"
+          raise ConfigurationError, "scratch SQLite path is required" if sqlite_path.to_s.strip.empty?
+        else
+          raise ConfigurationError, "scratch database name is required" if database_name.to_s.strip.empty?
+        end
+      end
+
+      def validate_local_machine_database_target(adapter)
+        config.validate_local_database_restore_target(adapter.current_target_identifier)
       end
 
       def run_drill_check(command)

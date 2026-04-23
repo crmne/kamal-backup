@@ -50,7 +50,7 @@ module KamalBackup
         CommandSpec.new(argv: argv, env: connection)
       end
 
-      def local_restore_command
+      def current_restore_command
         connection = current_connection
         database = connection.fetch("PGDATABASE")
 
@@ -59,15 +59,35 @@ module KamalBackup
         CommandSpec.new(argv: argv, env: connection)
       end
 
+      def scratch_restore_command(target)
+        connection = current_connection.merge("PGDATABASE" => target)
+
+        argv = %w[pg_restore --clean --if-exists --no-owner --no-privileges --dbname]
+        argv << target
+        CommandSpec.new(argv: argv, env: connection)
+      end
+
       def restore_target_identifier
         value("RESTORE_DATABASE_URL") || value("RESTORE_PGDATABASE")
       end
 
-      def local_restore_target_identifier
+      def current_target_identifier
         value("DATABASE_URL") || value("PGDATABASE")
       end
 
+      def scratch_target_identifier(target)
+        [current_connection["PGHOST"], target].compact.join("/")
+      end
+
       private
+        def validate_scratch_restore_target(target)
+          if current_connection.fetch("PGDATABASE") == target
+            raise ConfigurationError, "scratch database must differ from the current PostgreSQL database"
+          end
+
+          super
+        end
+
         def current_connection
           if value("DATABASE_URL")
             connection_from_url(value("DATABASE_URL"), "DATABASE_URL")

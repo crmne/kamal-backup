@@ -40,13 +40,6 @@ class ConfigTest < Minitest::Test
     end
   end
 
-  def test_restore_requires_explicit_flag
-    config = KamalBackup::Config.new(env: base_env)
-
-    error = assert_raises(KamalBackup::ConfigurationError) { config.validate_restore_allowed }
-    assert_match(/KAMAL_BACKUP_ALLOW_RESTORE=true/, error.message)
-  end
-
   def test_refuses_production_like_restore_target
     config = KamalBackup::Config.new(env: base_env)
 
@@ -56,34 +49,39 @@ class ConfigTest < Minitest::Test
     assert_match(/production-looking/, error.message)
   end
 
-  def test_local_restore_refuses_production_environment_without_override
+  def test_local_machine_restore_does_not_require_a_restore_flag
+    Dir.mktmpdir do |dir|
+      config = KamalBackup::Config.new(env: base_env("BACKUP_PATHS" => dir))
+
+      config.validate_local_machine_restore
+    end
+  end
+
+  def test_local_machine_restore_refuses_production_environment_without_override
     config = KamalBackup::Config.new(env: base_env(
       "BACKUP_PATHS" => "/tmp/storage",
-      "KAMAL_BACKUP_ALLOW_RESTORE" => "true",
       "RAILS_ENV" => "production"
     ))
 
-    error = assert_raises(KamalBackup::ConfigurationError) { config.validate_local_restore }
-    assert_match(/restore-local refuses to run with RAILS_ENV=production/, error.message)
+    error = assert_raises(KamalBackup::ConfigurationError) { config.validate_local_machine_restore }
+    assert_match(/restore local refuses to run with RAILS_ENV=production/, error.message)
   end
 
-  def test_local_restore_accepts_missing_target_paths
+  def test_local_machine_restore_accepts_missing_target_paths
     config = KamalBackup::Config.new(env: base_env(
-      "BACKUP_PATHS" => "/tmp/storage",
-      "KAMAL_BACKUP_ALLOW_RESTORE" => "true"
+      "BACKUP_PATHS" => "/tmp/storage"
     ))
 
-    config.validate_local_restore
+    config.validate_local_machine_restore
   end
 
-  def test_local_restore_source_paths_must_match_target_path_count
+  def test_local_machine_restore_source_paths_must_match_target_path_count
     config = KamalBackup::Config.new(env: base_env(
       "BACKUP_PATHS" => "/tmp/storage:/tmp/uploads",
-      "LOCAL_RESTORE_SOURCE_PATHS" => "/data/storage",
-      "KAMAL_BACKUP_ALLOW_RESTORE" => "true"
+      "LOCAL_RESTORE_SOURCE_PATHS" => "/data/storage"
     ))
 
-    error = assert_raises(KamalBackup::ConfigurationError) { config.validate_local_restore }
+    error = assert_raises(KamalBackup::ConfigurationError) { config.validate_local_machine_restore }
     assert_match(/LOCAL_RESTORE_SOURCE_PATHS must contain the same number of paths as BACKUP_PATHS/, error.message)
   end
 

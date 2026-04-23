@@ -37,9 +37,13 @@ module KamalBackup
         restic.pipe_dump_to_command(snapshot, filename, restore_command)
       end
 
-      def restore_local(restic, snapshot, filename)
-        validate_local_restore_target
-        restic.pipe_dump_to_command(snapshot, filename, local_restore_command)
+      def restore_to_current(restic, snapshot, filename)
+        restic.pipe_dump_to_command(snapshot, filename, current_restore_command)
+      end
+
+      def restore_to_scratch(restic, snapshot, filename, target:)
+        validate_scratch_restore_target(target)
+        restic.pipe_dump_to_command(snapshot, filename, scratch_restore_command(target))
       end
 
       def database_filename(timestamp)
@@ -67,7 +71,11 @@ module KamalBackup
         raise NotImplementedError
       end
 
-      def local_restore_command
+      def current_restore_command
+        raise NotImplementedError
+      end
+
+      def scratch_restore_command(target)
         raise NotImplementedError
       end
 
@@ -75,15 +83,19 @@ module KamalBackup
         config.validate_database_restore_target(restore_target_identifier)
       end
 
-      def validate_local_restore_target
-        config.validate_local_database_restore_target(local_restore_target_identifier)
+      def validate_scratch_restore_target(target)
+        config.validate_database_restore_target(scratch_target_identifier(target))
       end
 
       def restore_target_identifier
         raise NotImplementedError
       end
 
-      def local_restore_target_identifier
+      def current_target_identifier
+        raise NotImplementedError
+      end
+
+      def scratch_target_identifier(target)
         raise NotImplementedError
       end
 

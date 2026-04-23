@@ -31,15 +31,13 @@ This is why the docs talk about database backups rather than raw database direct
 
 ## Deliberate restores
 
-All restore commands require `KAMAL_BACKUP_ALLOW_RESTORE=true`.
+Restore commands are explicit and deliberate:
 
-Database restores use restore-specific targets:
-
-- PostgreSQL/MySQL/MariaDB: `RESTORE_DATABASE_URL`
-- SQLite: `RESTORE_SQLITE_DATABASE_PATH`
+- operators must choose `restore local`, `restore production`, `drill local`, or `drill production`
+- destructive restore commands prompt for confirmation unless `--yes` is passed
+- local restores refuse production-looking local targets unless `KAMAL_BACKUP_ALLOW_PRODUCTION_RESTORE=true`
+- production drills restore into scratch targets, not the live production database
 
 Production-looking targets are refused unless `KAMAL_BACKUP_ALLOW_PRODUCTION_RESTORE=true`.
 
-File restores into configured backup paths are refused unless `KAMAL_BACKUP_ALLOW_IN_PLACE_FILE_RESTORE=true`.
-
-Those checks are there to make restore drills deliberate. They also help when you need to explain to a reviewer that backup restores cannot quietly point back at production by accident.
+Those checks are there to make restores deliberate. They also help when you need to explain to a reviewer that a restore drill cannot quietly point back at production by accident.

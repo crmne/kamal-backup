@@ -53,13 +53,13 @@ class DatabaseAdaptersTest < Minitest::Test
     )
   end
 
-  def test_postgres_local_restore_uses_current_database_url
+  def test_postgres_current_restore_uses_current_database_url
     config = KamalBackup::Config.new(env: base_env(
       "DATABASE_ADAPTER" => "postgres",
       "DATABASE_URL" => "postgres://app:secret@db/app_development"
     ))
     adapter = KamalBackup::Databases::Postgres.new(config, redactor: redactor)
-    command = adapter.local_restore_command
+    command = adapter.current_restore_command
 
     assert_includes command.argv, "app_development"
     refute_includes command.argv.join(" "), "secret"
@@ -72,6 +72,18 @@ class DatabaseAdaptersTest < Minitest::Test
       },
       command.env
     )
+  end
+
+  def test_postgres_scratch_restore_uses_the_requested_database
+    config = KamalBackup::Config.new(env: base_env(
+      "DATABASE_ADAPTER" => "postgres",
+      "DATABASE_URL" => "postgres://app:secret@db/app_production"
+    ))
+    adapter = KamalBackup::Databases::Postgres.new(config, redactor: redactor)
+    command = adapter.scratch_restore_command("app_restore_20260423")
+
+    assert_includes command.argv, "app_restore_20260423"
+    assert_equal "app_restore_20260423", command.env.fetch("PGDATABASE")
   end
 
   def test_postgres_restore_target_identifier_keeps_url_for_exact_safety_check
@@ -120,17 +132,31 @@ class DatabaseAdaptersTest < Minitest::Test
     assert_equal({ "MYSQL_PWD" => "restore-secret" }, command.env)
   end
 
-  def test_mysql_local_restore_uses_current_database_url
+  def test_mysql_current_restore_uses_current_database_url
     config = KamalBackup::Config.new(env: base_env(
       "DATABASE_ADAPTER" => "mysql",
       "DATABASE_URL" => "mysql2://app:secret@mysql:3306/app_development",
       "MYSQL_CLIENT_BIN" => "mysql"
     ))
     adapter = KamalBackup::Databases::Mysql.new(config, redactor: redactor)
-    command = adapter.local_restore_command
+    command = adapter.current_restore_command
 
     assert_equal "mysql", command.argv.first
     assert_includes command.argv, "app_development"
+    assert_equal({ "MYSQL_PWD" => "secret" }, command.env)
+  end
+
+  def test_mysql_scratch_restore_uses_the_requested_database
+    config = KamalBackup::Config.new(env: base_env(
+      "DATABASE_ADAPTER" => "mysql",
+      "DATABASE_URL" => "mysql2://app:secret@mysql:3306/app_production",
+      "MYSQL_CLIENT_BIN" => "mysql"
+    ))
+    adapter = KamalBackup::Databases::Mysql.new(config, redactor: redactor)
+    command = adapter.scratch_restore_command("app_restore_20260423")
+
+    assert_equal "mysql", command.argv.first
+    assert_includes command.argv, "app_restore_20260423"
     assert_equal({ "MYSQL_PWD" => "secret" }, command.env)
   end
 
@@ -150,14 +176,27 @@ class DatabaseAdaptersTest < Minitest::Test
     end
   end
 
-  def test_sqlite_local_restore_allows_restoring_back_into_the_current_database
+  def test_sqlite_current_restore_uses_the_configured_database_path
     config = KamalBackup::Config.new(env: base_env(
       "DATABASE_ADAPTER" => "sqlite",
       "SQLITE_DATABASE_PATH" => "/tmp/app_development.sqlite3"
     ))
     adapter = KamalBackup::Databases::Sqlite.new(config, redactor: redactor)
 
-    adapter.send(:validate_local_restore_target)
+    assert_equal "/tmp/app_development.sqlite3", adapter.current_target_identifier
+  end
+
+  def test_sqlite_scratch_restore_refuses_the_current_database_path
+    config = KamalBackup::Config.new(env: base_env(
+      "DATABASE_ADAPTER" => "sqlite",
+      "SQLITE_DATABASE_PATH" => "/tmp/app_development.sqlite3"
+    ))
+    adapter = KamalBackup::Databases::Sqlite.new(config, redactor: redactor)
+
+    error = assert_raises(KamalBackup::ConfigurationError) do
+      adapter.send(:validate_scratch_restore_target, "/tmp/app_development.sqlite3")
+    end
+    assert_match(/scratch SQLite path must differ/, error.message)
   end
 
   def test_sqlite_literal_escapes_single_quotes

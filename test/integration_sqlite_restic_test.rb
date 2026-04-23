@@ -29,11 +29,8 @@ class IntegrationSqliteResticTest < Minitest::Test
       )
 
       KamalBackup::App.new(env: env).backup
-      KamalBackup::App.new(env: env.merge(
-        "KAMAL_BACKUP_ALLOW_RESTORE" => "true",
-        "RESTORE_SQLITE_DATABASE_PATH" => restored_db
-      )).restore_database("latest")
-      KamalBackup::App.new(env: env.merge("KAMAL_BACKUP_ALLOW_RESTORE" => "true")).restore_files("latest", target: restored_files)
+      KamalBackup::App.new(env: env.merge("RESTORE_SQLITE_DATABASE_PATH" => restored_db)).restore_database("latest")
+      KamalBackup::App.new(env: env).restore_files("latest", target: restored_files)
 
       output = `sqlite3 #{restored_db} "select name from items"`
       assert_equal "stored", output.strip
@@ -72,7 +69,7 @@ class IntegrationSqliteResticTest < Minitest::Test
       system("sqlite3", db, "DELETE FROM items; INSERT INTO items VALUES ('changed');", exception: true)
       File.write(File.join(files, "hello.txt"), "changed")
 
-      KamalBackup::App.new(env: env.merge("KAMAL_BACKUP_ALLOW_RESTORE" => "true")).restore_local("latest")
+      KamalBackup::App.new(env: env).restore_to_local_machine("latest")
 
       output = `sqlite3 #{db} "select name from items"`
       assert_equal "stored", output.strip

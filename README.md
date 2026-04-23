@@ -98,18 +98,15 @@ Once you have a scratch restore target configured, it also makes sense to add a 
 
 ```yaml
 aliases:
-  backup-drill: accessory exec backup "kamal-backup drill latest --file-target /restore/files --check 'test -d /restore/files/data/storage'"
+  backup-drill: accessory exec backup "kamal-backup drill production latest --database app_restore_20260423 --files /restore/files --check 'test -d /restore/files/data/storage' --yes"
 ```
 
-That alias only belongs in `deploy.yml` after `RESTORE_DATABASE_URL` or `RESTORE_SQLITE_DATABASE_PATH` points at a non-production restore target.
+That alias only belongs in `deploy.yml` after you have picked real scratch targets for drills.
 
-Low-level restore commands are intentionally not part of the default alias block. They require explicit restore flags and restore-specific targets, so run them with raw Kamal commands such as:
+Deliberate restore commands are intentionally not part of the default alias block. Run them directly when you need them:
 
 ```sh
-bin/kamal accessory exec backup \
-  --env KAMAL_BACKUP_ALLOW_RESTORE=true \
-  --env RESTORE_DATABASE_URL=postgres://app@app-db:5432/app_restore \
-  "kamal-backup restore-db 19ce9f99"
+bin/kamal accessory exec backup "kamal-backup restore production 19ce9f99"
 ```
 
 ## How a Backup Run Works
@@ -134,10 +131,10 @@ Commands usually run inside the production backup accessory with `bin/kamal acce
 
 ```sh
 kamal-backup backup
-kamal-backup drill [snapshot-or-latest]
-kamal-backup restore-db [snapshot-or-latest]
-kamal-backup restore-files [snapshot-or-latest] [target-dir]
-kamal-backup restore-local [snapshot-or-latest]
+kamal-backup restore local [snapshot-or-latest]
+kamal-backup restore production [snapshot-or-latest]
+kamal-backup drill local [snapshot-or-latest]
+kamal-backup drill production [snapshot-or-latest]
 kamal-backup list
 kamal-backup check
 kamal-backup evidence
@@ -150,10 +147,10 @@ Use `kamal-backup help [command]` for command-specific usage and examples.
 | Command | What it does |
 |---|---|
 | `backup` | Creates one database backup and one file snapshot for all configured `BACKUP_PATHS`. |
-| `drill [snapshot-or-latest]` | Runs a restore drill, prints JSON with the result, and stores the latest drill record under `KAMAL_BACKUP_STATE_DIR`. |
-| `restore-db [snapshot-or-latest]` | Restores a database backup. Defaults to `latest` and requires explicit restore environment. |
-| `restore-files [snapshot-or-latest] [target-dir]` | Restores file paths from the file snapshot. Defaults to `latest /restore/files`. |
-| `restore-local [snapshot-or-latest]` | Restores the latest database and file snapshots into the current local database settings and `BACKUP_PATHS`. This is the low-level local restore primitive behind `drill --local`. |
+| `restore local [snapshot-or-latest]` | Restores the latest backup into your local development database and local `BACKUP_PATHS`. |
+| `restore production [snapshot-or-latest]` | Restores the latest backup back into the live production database and production `BACKUP_PATHS`. |
+| `drill local [snapshot-or-latest]` | Runs a local restore, optionally runs a verification command, and stores the latest drill result under `KAMAL_BACKUP_STATE_DIR`. |
+| `drill production [snapshot-or-latest]` | Restores into scratch targets on production infrastructure, optionally runs a verification command, and stores the latest drill result. |
 | `list` | Lists restic snapshots for the configured app tags. |
 | `check` | Runs `restic check` and records the latest result for evidence output. |
 | `evidence` | Prints redacted JSON with backup configuration, latest snapshots, latest check result, latest drill result, and tool versions. |
@@ -243,91 +240,76 @@ RESTIC_CHECK_AFTER_BACKUP=false
 RESTIC_CHECK_READ_DATA_SUBSET=5%
 ```
 
+## Restore
+
+`restore` means "put data back."
+
+`restore local` runs on your machine and restores into your local development database and local `BACKUP_PATHS`:
+
+```sh
+bundle exec exe/kamal-backup restore local latest
+```
+
+That command needs:
+
+- local database settings through `DATABASE_URL` or `SQLITE_DATABASE_PATH`
+- local file targets through `BACKUP_PATHS`
+- access to the restic repository through `RESTIC_REPOSITORY` and `RESTIC_PASSWORD`
+
+If the production file paths differ from the local ones, set `LOCAL_RESTORE_SOURCE_PATHS` to the production path list and keep `BACKUP_PATHS` pointed at the local targets.
+
+`restore production` runs from the backup accessory and restores back into the live production database and production `BACKUP_PATHS`:
+
+```sh
+bin/kamal accessory exec backup "kamal-backup restore production latest"
+```
+
+Destructive restore commands prompt for confirmation. Add `--yes` for automation:
+
+```sh
+bin/kamal accessory exec backup "kamal-backup restore production latest --yes"
+```
+
 ## Restore Drills
 
-Restores are intentionally hard to run by accident. Every restore command requires:
+`drill` means "restore, check, and record the result."
+
+For small apps, the fastest proof is often a local drill:
 
 ```sh
-KAMAL_BACKUP_ALLOW_RESTORE=true
+bundle exec exe/kamal-backup drill local latest --check "bin/rails runner 'puts User.count'"
 ```
 
-For small apps, the fastest proof that a backup is real is often a restore straight into your local development environment:
+`drill local` restores onto your machine, runs the optional verification command, and writes `last_restore_drill.json` under `KAMAL_BACKUP_STATE_DIR`.
 
-```sh
-KAMAL_BACKUP_ALLOW_RESTORE=true bundle exec exe/kamal-backup drill --local
-```
-
-`drill --local` uses your current `DATABASE_URL` or `SQLITE_DATABASE_PATH`, plus your current `BACKUP_PATHS`. It restores files through a temporary staging directory and then replaces those local paths with the restored copy. If the production backup path and the local path differ, set `LOCAL_RESTORE_SOURCE_PATHS` to the production path list and keep `BACKUP_PATHS` pointed at the local targets. It refuses to run when `RAILS_ENV`, `RACK_ENV`, `APP_ENV`, or `KAMAL_ENVIRONMENT` is set to `production` unless you explicitly override that safety check. That makes it a good fit for developer laptops, small Rails apps, and quick "does this actually come back?" checks.
-
-If you are working with a bigger app, use `drill` through the backup accessory against a scratch database and scratch file path instead. That keeps drills closer to production scale without pointing the restore back at live data.
-
-Targeted drill with an optional verification command:
+For bigger apps, the main drill should usually be production-side and scratch-based:
 
 ```sh
 bin/kamal accessory exec backup \
-  --env KAMAL_BACKUP_ALLOW_RESTORE=true \
-  --env RESTORE_DATABASE_URL=postgres://app@app-db:5432/app_restore \
-  "kamal-backup drill latest --file-target /restore/files --check 'test -d /restore/files/data/storage'"
+  "kamal-backup drill production latest --database app_restore_20260423 --files /restore/files --check 'test -d /restore/files/data/storage' --yes"
 ```
 
-Database restores use restore-specific environment by default. They do not restore to `DATABASE_URL`.
+`drill production` restores into a scratch database and scratch file path on production infrastructure. It does not restore into the live production database.
 
-PostgreSQL restore:
+For SQLite, use `--sqlite-path` instead of `--database`:
 
 ```sh
 bin/kamal accessory exec backup \
-  --env KAMAL_BACKUP_ALLOW_RESTORE=true \
-  --env RESTORE_DATABASE_URL=postgres://app@app-db:5432/app_restore \
-  "kamal-backup restore-db latest"
-```
-
-MySQL/MariaDB restore:
-
-```sh
-bin/kamal accessory exec backup \
-  --env KAMAL_BACKUP_ALLOW_RESTORE=true \
-  --env RESTORE_DATABASE_URL=mysql2://app@app-mysql:3306/app_restore \
-  "kamal-backup restore-db latest"
-```
-
-SQLite restore:
-
-```sh
-bin/kamal accessory exec backup \
-  --env KAMAL_BACKUP_ALLOW_RESTORE=true \
-  --env RESTORE_SQLITE_DATABASE_PATH=/restore/db/restore.sqlite3 \
-  "kamal-backup restore-db latest"
-```
-
-File restore:
-
-```sh
-bin/kamal accessory exec backup \
-  --env KAMAL_BACKUP_ALLOW_RESTORE=true \
-  "kamal-backup restore-files latest /restore/files"
-```
-
-Restore targets that look production-like are refused unless:
-
-```sh
-KAMAL_BACKUP_ALLOW_PRODUCTION_RESTORE=true
-```
-
-File restores to configured backup paths are refused unless:
-
-```sh
-KAMAL_BACKUP_ALLOW_IN_PLACE_FILE_RESTORE=true
+  "kamal-backup drill production latest --sqlite-path /restore/db/restore.sqlite3 --files /restore/files --check 'test -f /restore/db/restore.sqlite3' --yes"
 ```
 
 Run restore drills regularly and keep a short note with the result:
 
-- when you ran it;
-- who ran it;
-- which snapshot you restored;
-- which target you used;
-- whether the restored data looked correct.
+- when you ran it
+- who ran it
+- which snapshot you restored
+- whether it was a local drill or a production-side drill
+- which scratch targets you used
+- whether the restored data looked correct
 
-Every `kamal-backup drill` run also writes `last_restore_drill.json` under `KAMAL_BACKUP_STATE_DIR`, and `kamal-backup evidence` includes that latest result.
+Production-looking local targets are refused unless `KAMAL_BACKUP_ALLOW_PRODUCTION_RESTORE=true`.
+
+Every drill run also writes `last_restore_drill.json` under `KAMAL_BACKUP_STATE_DIR`, and `kamal-backup evidence` includes that latest result.
 
 ## Evidence for CASA and Security Reviews
 
@@ -358,7 +340,7 @@ For CASA or another review, a practical workflow looks like this:
 
 1. Run backups on a schedule.
 2. Run `kamal-backup check` on a schedule, or enable `RESTIC_CHECK_AFTER_BACKUP=true`.
-3. Run `kamal-backup drill` against a non-production target.
+3. Run `kamal-backup drill production` against a scratch target, or `kamal-backup drill local` for a smaller app.
 4. Save a short note about the drill if you want operator context beyond the JSON result.
 5. Attach the `kamal-backup evidence` JSON plus that note to the review packet.
 
@@ -442,7 +424,7 @@ The image is based on Debian slim Ruby and includes:
 - The CLI redacts secrets in errors and evidence output.
 - Database backups use database-native export tools.
 - File data should be mounted read-only in the backup accessory.
-- Restores require explicit environment flags.
+- Restores are explicit, prompted operations with separate local and production-side drill flows.
 - Object storage credentials should be least-privilege for the backup bucket or prefix.
 
 ## Non-Goals

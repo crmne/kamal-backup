@@ -41,13 +41,13 @@ If your Rails app already stores Active Storage blobs directly in S3, there may 
 ## What the commands mean
 
 - `backup`: Create one new database snapshot and one new file snapshot.
-- `drill`: Run a restore drill and record the latest drill result as JSON.
+- `restore local`: Pull the latest backup from restic onto your machine and restore it into your local development database and file paths.
+- `restore production`: Restore a backup back into the production database and production file paths.
+- `drill local`: Run a local restore plus an optional verification command, then record the result as JSON.
+- `drill production`: Restore into a scratch database and scratch file path on production infrastructure, run an optional verification command, and record the result as JSON.
 - `list`: Show restic snapshots for this app so you can see recent runs and snapshot IDs.
 - `check`: Run `restic check` and store the latest result in `KAMAL_BACKUP_STATE_DIR`.
 - `evidence`: Print a redacted JSON summary with current backup settings, latest snapshots, latest check result, latest drill result, and tool versions. This is meant to be attached to internal ops records or security reviews.
-- `restore-db`: Restore a database backup into an explicitly configured restore target.
-- `restore-files`: Restore a file snapshot into a target directory, usually `/restore/files`.
-- `restore-local`: Restore the latest database and file snapshots into the current local development database and file paths. This is the low-level local restore primitive behind `drill --local`.
 
 ## Snapshot tags
 

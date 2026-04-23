@@ -102,12 +102,12 @@ Once you have a scratch restore target configured, add a drill alias too:
 
 ```yaml
 aliases:
-  backup-drill: accessory exec backup "kamal-backup drill latest --file-target /restore/files --check 'test -d /restore/files/data/storage'"
+  backup-drill: accessory exec backup "kamal-backup drill production latest --database app_restore_20260423 --files /restore/files --check 'test -d /restore/files/data/storage' --yes"
 ```
 
-Only add that after `RESTORE_DATABASE_URL` or `RESTORE_SQLITE_DATABASE_PATH` points at a non-production restore target for the accessory.
+Only add that after you have picked a real scratch database name or SQLite path and a scratch file path for drills.
 
-Low-level restore commands are intentionally not aliased in the default block. They require explicit restore flags and restore-specific targets, so run `bin/kamal accessory exec backup "kamal-backup ..."` directly.
+Deliberate restore commands are intentionally not aliased in the default block. Use `bin/kamal accessory exec backup "kamal-backup ..."` directly when you need `restore production`, and run `restore local` from your own machine.
 
 ## What the first backup creates
 

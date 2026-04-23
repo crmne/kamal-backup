@@ -6,16 +6,120 @@ require_relative "version"
 
 module KamalBackup
   class CLI < Thor
+    class CommandBase < Thor
+      class_option :yes, aliases: "-y", type: :boolean, default: false, desc: "Skip confirmation prompt"
+      remove_command :tree
+
+      def initialize(args = [], local_options = {}, config = {})
+        super
+        @app = App.new(env: CLI.command_env || ENV)
+      end
+
+      no_commands do
+        def app
+          @app
+        end
+
+        def confirm!(message)
+          return if options[:yes]
+
+          unless $stdin.tty?
+            raise ConfigurationError, "confirmation required; rerun with --yes"
+          end
+
+          unless yes?("#{message} [y/N]")
+            raise ConfigurationError, "aborted"
+          end
+        end
+
+        def prompt_required(label)
+          unless $stdin.tty?
+            raise ConfigurationError, "#{label.downcase} is required; pass it on the command line"
+          end
+
+          value = ask("#{label}:").to_s.strip
+          if value.empty?
+            raise ConfigurationError, "#{label.downcase} is required"
+          else
+            value
+          end
+        end
+      end
+    end
+
+    class RestoreCLI < CommandBase
+      def self.basename
+        CLI.basename
+      end
+
+      desc "local [SNAPSHOT]", "Restore the backup into the local database and local files"
+      def local(snapshot = "latest")
+        confirm!("Restore #{snapshot} into the local database and local files? This will overwrite local data.")
+        puts(JSON.pretty_generate(app.restore_to_local_machine(snapshot)))
+      end
+
+      desc "production [SNAPSHOT]", "Restore the backup into the production database and production files"
+      def production(snapshot = "latest")
+        confirm!("Restore #{snapshot} into the production database and production files? This will overwrite production data.")
+        puts(JSON.pretty_generate(app.restore_to_production(snapshot)))
+      end
+    end
+
+    class DrillCLI < CommandBase
+      def self.basename
+        CLI.basename
+      end
+
+      method_option :check, type: :string, desc: "Run a verification command after the restore"
+      desc "local [SNAPSHOT]", "Run a restore drill on the local machine"
+      def local(snapshot = "latest")
+        confirm!("Run a local restore drill for #{snapshot}? This will overwrite local data.")
+        result = app.drill_on_local_machine(snapshot, check_command: options[:check])
+        puts(JSON.pretty_generate(result))
+        exit(1) if app.drill_failed?(result)
+      end
+
+      method_option :database, type: :string, desc: "Scratch database name for PostgreSQL or MySQL"
+      method_option :"sqlite-path", type: :string, desc: "Scratch SQLite path for production-side drills"
+      method_option :files, type: :string, default: "/restore/files", desc: "Scratch files target for the drill"
+      method_option :check, type: :string, desc: "Run a verification command after the restore"
+      desc "production [SNAPSHOT]", "Run a restore drill on production infrastructure using scratch targets"
+      def production(snapshot = "latest")
+        confirm!("Run a production-side restore drill for #{snapshot}? This will restore into scratch targets on production infrastructure.")
+
+        result = app.drill_on_production(
+          snapshot,
+          database_name: production_database_name,
+          sqlite_path: options[:"sqlite-path"],
+          file_target: options[:files],
+          check_command: options[:check]
+        )
+        puts(JSON.pretty_generate(result))
+        exit(1) if app.drill_failed?(result)
+      end
+
+      no_commands do
+        def production_database_name
+          if app.config.database_adapter == "sqlite"
+            nil
+          else
+            options[:database] || prompt_required("Scratch database name")
+          end
+        end
+      end
+    end
+
     class << self
       attr_accessor :command_env
     end
 
     package_name "kamal-backup"
     map %w[-v --version] => :version
-    map "restore-db" => :restore_database
-    map "restore-files" => :restore_files
-    map "restore-local" => :restore_local
     remove_command :tree
+    desc "restore SUBCOMMAND ...ARGS", "Restore a backup onto the local machine or into production"
+    subcommand "restore", RestoreCLI
+    desc "drill SUBCOMMAND ...ARGS", "Run a restore drill on the local machine or on production infrastructure"
+    subcommand "drill", DrillCLI
 
     def self.basename
       "kamal-backup"
@@ -42,37 +146,6 @@ module KamalBackup
     desc "backup", "Run one backup immediately"
     def backup
       app.backup
-    end
-
-    desc "restore-db [SNAPSHOT]", "Restore a database dump"
-    def restore_database(snapshot = "latest")
-      app.restore_database(snapshot)
-    end
-
-    desc "restore-files [SNAPSHOT] [TARGET_DIR]", "Restore backed up files into a target directory"
-    def restore_files(snapshot = "latest", target_dir = "/restore/files")
-      app.restore_files(snapshot, target: target_dir)
-    end
-
-    desc "restore-local [SNAPSHOT]", "Restore database and files into the current local environment"
-    def restore_local(snapshot = "latest")
-      app.restore_local(snapshot)
-    end
-
-    desc "drill [SNAPSHOT]", "Run a restore drill and record the result"
-    method_option :local, type: :boolean, default: false, desc: "Restore into the current local database and file paths"
-    method_option :check, type: :string, desc: "Run a verification command after the restore"
-    method_option :"file-target", type: :string, default: "/restore/files", desc: "File restore target for non-local drills"
-    def drill(snapshot = "latest")
-      result = app.drill(
-        snapshot,
-        local: options[:local],
-        check_command: options[:check],
-        file_target: options[:"file-target"]
-      )
-
-      puts(JSON.pretty_generate(result))
-      exit(1) if app.drill_failed?(result)
     end
 
     desc "list", "List matching restic snapshots"
