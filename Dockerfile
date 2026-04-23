@@ -17,7 +17,7 @@ WORKDIR /app
 COPY Gemfile Gemfile.lock kamal-backup.gemspec ./
 COPY lib/kamal_backup/version.rb ./lib/kamal_backup/version.rb
 
-RUN bundle config set without "test" \
+RUN bundle config set without "development test" \
   && bundle install
 
 COPY README.md LICENSE ./
