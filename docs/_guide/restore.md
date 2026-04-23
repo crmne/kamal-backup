@@ -24,11 +24,17 @@ When you pass `-d` or `-c`, `kamal-backup` asks Kamal for the backup accessory c
 - `RESTIC_REPOSITORY`
 - `LOCAL_RESTORE_SOURCE_PATHS` from the accessory `BACKUP_PATHS`
 
-You still provide the local targets yourself in `config/kamal-backup.local.yml` or env:
+For a normal Rails app, the local targets come from Rails conventions:
 
-- `DATABASE_URL` or `SQLITE_DATABASE_PATH`
-- `BACKUP_PATHS`
-- local secrets such as `RESTIC_PASSWORD` and DB passwords
+- the development database in `config/database.yml`
+- `storage` as the local files target
+- `tmp/kamal-backup` as the local drill state directory
+
+You still provide the local secrets yourself in env:
+
+- `RESTIC_PASSWORD`
+- `POSTGRES_PASSWORD` or `MYSQL_PWD` when needed
+- `RESTIC_REPOSITORY` when it is not visible through `kamal config`
 
 Example:
 
@@ -36,7 +42,7 @@ Example:
 bundle exec kamal-backup -d production restore local latest
 ```
 
-Without `-d` or `-c`, `restore local` reads everything from local config and env.
+Without `-d` or `-c`, `restore local` reads from the local Rails app and env.
 
 What it does:
 
@@ -44,7 +50,7 @@ What it does:
 - restores the latest file snapshot into a temporary staging directory
 - replaces the local `BACKUP_PATHS` with the restored copy
 
-Example local file:
+If your local targets are nonstandard, create `config/kamal-backup.local.yml`:
 
 ```yaml
 database_url: postgres://localhost/chatwithwork_development

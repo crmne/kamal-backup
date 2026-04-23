@@ -168,10 +168,10 @@ class CLITest < Minitest::Test
       end
 
       assert File.file?(File.join(dir, "config", "kamal-backup.yml"))
-      assert File.file?(File.join(dir, "config", "kamal-backup.local.yml"))
       assert_includes File.read(File.join(dir, "config", "kamal-backup.yml")), "accessory: backup"
-      assert_includes File.read(File.join(dir, "config", "kamal-backup.local.yml")), "state_dir: tmp/kamal-backup"
+      refute File.exist?(File.join(dir, "config", "kamal-backup.local.yml"))
       assert_includes out, "Add this accessory block to your Kamal deploy config:"
+      assert_includes out, "Create config/kamal-backup.local.yml only if you need to override those local defaults."
       refute_includes out, "aliases:"
     end
   end
@@ -225,11 +225,13 @@ class CLITest < Minitest::Test
       config_dir = File.join(dir, "config")
       FileUtils.mkdir_p(config_dir)
       File.write(
-        File.join(config_dir, "kamal-backup.local.yml"),
+        File.join(config_dir, "database.yml"),
         <<~YAML
-          database_url: postgres://localhost/chatwithwork_development
-          backup_paths:
-            - storage
+          development:
+            adapter: postgresql
+            database: chatwithwork_development
+            username: chatwithwork
+            host: localhost
         YAML
       )
 
@@ -255,7 +257,10 @@ class CLITest < Minitest::Test
       assert_equal "postgres", config.database_adapter
       assert_equal "s3:https://s3.example.com/chatwithwork-backups", config.restic_repository
       assert_equal ["/data/storage"], config.local_restore_source_paths
-      assert_equal ["storage"], config.backup_paths
+      assert_equal "chatwithwork_development", config.value("PGDATABASE")
+      assert_equal "chatwithwork", config.value("PGUSER")
+      assert_equal "localhost", config.value("PGHOST")
+      assert_equal [File.join(dir, "storage")], config.backup_paths
       assert_includes out, "\"status\": \"ok\""
     end
   end

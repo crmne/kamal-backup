@@ -40,7 +40,7 @@ group :development do
 end
 ```
 
-Install it and generate the local config stubs:
+Install it and generate the shared config stub:
 
 ```sh
 bundle install
@@ -50,7 +50,14 @@ bundle exec kamal-backup init
 That creates:
 
 - `config/kamal-backup.yml`
-- `config/kamal-backup.local.yml`
+
+For most Rails apps, that is enough. `restore local` and `drill local` can infer:
+
+- the development database target from `config/database.yml`
+- the local files target from `storage`
+- the local drill state directory from `tmp/kamal-backup`
+
+Only create `config/kamal-backup.local.yml` if you need to override those local defaults.
 
 Then add the backup accessory to `config/deploy.yml`:
 
@@ -174,11 +181,17 @@ That shared `run:<timestamp>` tag lets you match the database backup and file ba
 - `RESTIC_REPOSITORY`
 - `LOCAL_RESTORE_SOURCE_PATHS` from the accessory `BACKUP_PATHS`
 
-You still provide the local targets yourself in `config/kamal-backup.local.yml` or env:
+For a normal Rails app, the local targets come from Rails conventions:
 
-- `DATABASE_URL` or `SQLITE_DATABASE_PATH`
-- `BACKUP_PATHS`
-- local secrets such as `RESTIC_PASSWORD` and DB passwords
+- the development database in `config/database.yml`
+- `storage` as the local files target
+- `tmp/kamal-backup` as the local drill state directory
+
+You still provide the local secrets yourself in env:
+
+- `RESTIC_PASSWORD`
+- `POSTGRES_PASSWORD` or `MYSQL_PWD` when needed
+- `RESTIC_REPOSITORY` when it is not visible through `kamal config`
 
 Example:
 
@@ -271,12 +284,12 @@ DATABASE_ADAPTER=sqlite
 SQLITE_DATABASE_PATH=/data/db/production.sqlite3
 ```
 
-Local config files:
+Optional local config files:
 
 - `config/kamal-backup.yml`
 - `config/kamal-backup.local.yml`
 
-Keep secrets such as `RESTIC_PASSWORD`, cloud credentials, and local DB passwords in environment variables, not in YAML files.
+`config/kamal-backup.local.yml` is only for nonstandard local targets. Keep secrets such as `RESTIC_PASSWORD`, cloud credentials, and local DB passwords in environment variables, not in YAML files.
 
 ## Docs
 

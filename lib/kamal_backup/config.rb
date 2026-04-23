@@ -1,6 +1,7 @@
 require "uri"
 require "yaml"
 require_relative "errors"
+require_relative "rails_app"
 
 module KamalBackup
   class Config
@@ -46,7 +47,7 @@ module KamalBackup
 
     def initialize(env: ENV, cwd: Dir.pwd, defaults: {})
       raw_env = env.to_h
-      @env = defaults.to_h.merge(load_config_files(raw_env, cwd: cwd)).merge(raw_env)
+      @env = project_defaults(cwd: cwd).merge(defaults.to_h).merge(load_config_files(raw_env, cwd: cwd)).merge(raw_env)
     end
 
     def app_name
@@ -283,6 +284,10 @@ module KamalBackup
     end
 
     private
+      def project_defaults(cwd:)
+        RailsApp.new(cwd: cwd).defaults
+      end
+
       def load_config_files(raw_env, cwd:)
         config_paths(raw_env, cwd: cwd).each_with_object({}) do |path, merged|
           next unless File.file?(path)

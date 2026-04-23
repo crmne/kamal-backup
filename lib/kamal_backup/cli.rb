@@ -97,10 +97,6 @@ module KamalBackup
         File.join(init_config_root, "kamal-backup.yml")
       end
 
-      def local_config_path
-        File.join(init_config_root, "kamal-backup.local.yml")
-      end
-
       def write_init_file(path, contents)
         if File.exist?(path)
           say "Exists: #{path}", :yellow
@@ -116,19 +112,6 @@ module KamalBackup
           # Shared defaults for kamal-backup in this app.
           # Set this when your accessory is not named "backup".
           accessory: backup
-        YAML
-      end
-
-      def local_config_template
-        <<~YAML
-          # Local machine targets for restore local and drill local.
-          # With -d/-c, APP_NAME, DATABASE_ADAPTER, RESTIC_REPOSITORY, and
-          # LOCAL_RESTORE_SOURCE_PATHS can come from your Kamal accessory config.
-          # Keep secrets such as RESTIC_PASSWORD and cloud credentials in env.
-          database_url: postgres://localhost/your_app_development
-          backup_paths:
-            - storage
-          state_dir: tmp/kamal-backup
         YAML
       end
 
@@ -339,12 +322,14 @@ module KamalBackup
     desc "init", "Create kamal-backup config stubs for local restore and drill commands"
     def init
       write_init_file(shared_config_path, shared_config_template)
-      write_init_file(local_config_path, local_config_template)
 
       puts
       puts "Add this accessory block to your Kamal deploy config:"
       puts
       puts deploy_snippet
+      puts
+      puts "For most Rails apps, restore local and drill local can infer the development database, storage path, and tmp state directory."
+      puts "Create config/kamal-backup.local.yml only if you need to override those local defaults."
     end
 
     desc "schedule", "Run the foreground scheduler loop"

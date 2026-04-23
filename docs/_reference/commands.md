@@ -41,7 +41,7 @@ Use `kamal-backup help`, `kamal-backup help restore`, or `kamal-backup help dril
 
 | Command | Description |
 |---|---|
-| `init` | Create `config/kamal-backup.yml` and `config/kamal-backup.local.yml`, then print an accessory snippet for `deploy.yml`. |
+| `init` | Create `config/kamal-backup.yml`, then print an accessory snippet for `deploy.yml`. Create `config/kamal-backup.local.yml` only when you need to override Rails local defaults. |
 | `backup` | Create one database backup and one file snapshot for the current app. With `-d` or `-c`, it runs on production infrastructure through Kamal. |
 | `restore local [snapshot-or-latest]` | Restore onto your machine: current local database plus current local `BACKUP_PATHS`. Prompts before overwriting local data. With `-d` or `-c`, the source-side defaults come from the production accessory config. |
 | `restore production [snapshot-or-latest]` | Restore back into the live production database and production `BACKUP_PATHS`. Prompts before overwriting production data. With `-d` or `-c`, it shells out through Kamal. |

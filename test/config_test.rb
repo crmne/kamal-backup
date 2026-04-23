@@ -71,6 +71,93 @@ class ConfigTest < Minitest::Test
     end
   end
 
+  def test_infers_local_defaults_from_a_rails_postgres_app
+    Dir.mktmpdir do |dir|
+      config_dir = File.join(dir, "config")
+      FileUtils.mkdir_p(config_dir)
+      File.write(
+        File.join(config_dir, "database.yml"),
+        <<~YAML
+          default: &default
+            adapter: postgresql
+            pool: <%= ENV.fetch("RAILS_MAX_THREADS") { 5 } %>
+            username: app
+
+          development:
+            <<: *default
+            database: app_development
+            host: localhost
+            port: 5432
+        YAML
+      )
+      File.write(
+        File.join(config_dir, "deploy.yml"),
+        <<~YAML
+          service: app
+        YAML
+      )
+
+      config = KamalBackup::Config.new(env: { "RESTIC_REPOSITORY" => "/tmp/restic", "RESTIC_PASSWORD" => "secret" }, cwd: dir)
+
+      assert_equal "app", config.app_name
+      assert_equal "postgres", config.database_adapter
+      assert_equal "app", config.value("PGUSER")
+      assert_equal "app_development", config.value("PGDATABASE")
+      assert_equal "localhost", config.value("PGHOST")
+      assert_equal [File.join(dir, "storage")], config.backup_paths
+      assert_equal File.join(dir, "tmp", "kamal-backup"), config.state_dir
+    end
+  end
+
+  def test_infers_local_defaults_from_a_rails_sqlite_app
+    Dir.mktmpdir do |dir|
+      config_dir = File.join(dir, "config")
+      FileUtils.mkdir_p(config_dir)
+      File.write(
+        File.join(config_dir, "database.yml"),
+        <<~YAML
+          development:
+            adapter: sqlite3
+            database: storage/development.sqlite3
+        YAML
+      )
+
+      config = KamalBackup::Config.new(env: { "RESTIC_REPOSITORY" => "/tmp/restic", "RESTIC_PASSWORD" => "secret" }, cwd: dir)
+
+      assert_equal "sqlite", config.database_adapter
+      assert_equal File.join(dir, "storage", "development.sqlite3"), config.value("SQLITE_DATABASE_PATH")
+      assert_equal [File.join(dir, "storage")], config.backup_paths
+    end
+  end
+
+  def test_local_yaml_overrides_inferred_rails_defaults
+    Dir.mktmpdir do |dir|
+      config_dir = File.join(dir, "config")
+      FileUtils.mkdir_p(config_dir)
+      File.write(
+        File.join(config_dir, "database.yml"),
+        <<~YAML
+          development:
+            adapter: sqlite3
+            database: storage/development.sqlite3
+        YAML
+      )
+      File.write(
+        File.join(config_dir, "kamal-backup.local.yml"),
+        <<~YAML
+          sqlite_database_path: custom/dev.sqlite3
+          backup_paths:
+            - uploads
+        YAML
+      )
+
+      config = KamalBackup::Config.new(env: { "RESTIC_REPOSITORY" => "/tmp/restic", "RESTIC_PASSWORD" => "secret" }, cwd: dir)
+
+      assert_equal "custom/dev.sqlite3", config.value("SQLITE_DATABASE_PATH")
+      assert_equal ["uploads"], config.backup_paths
+    end
+  end
+
   def test_refuses_suspicious_backup_path
     config = KamalBackup::Config.new(env: base_env("DATABASE_ADAPTER" => "postgres", "DATABASE_URL" => "postgres://app@db/app", "BACKUP_PATHS" => "/"))
 

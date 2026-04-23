@@ -1,6 +1,6 @@
 ---
 title: Getting Started
-description: Install the gem, add the backup accessory, generate local config stubs, and run the first backup with Kamal-style destination selection.
+description: Install the gem, add the backup accessory, generate the shared config stub, and run the first backup with Kamal-style destination selection.
 nav_order: 1
 ---
 
@@ -22,7 +22,7 @@ group :development do
 end
 ```
 
-Then install it and generate the config stubs:
+Then install it and generate the shared config stub:
 
 ```sh
 bundle install
@@ -32,9 +32,10 @@ bundle exec kamal-backup init
 That creates:
 
 - `config/kamal-backup.yml`
-- `config/kamal-backup.local.yml`
 
-The shared file is where you name the accessory if it is not called `backup`. The local file is where you point `restore local` and `drill local` at your laptop database and local file paths.
+The shared file is where you name the accessory if it is not called `backup`.
+
+For most Rails apps, `restore local` and `drill local` can infer the local development database, the `storage` path, and `tmp/kamal-backup` without a second file. Only create `config/kamal-backup.local.yml` when your local targets are nonstandard.
 
 ## 2. Choose a restic repository
 

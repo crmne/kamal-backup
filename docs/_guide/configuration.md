@@ -1,6 +1,6 @@
 ---
 title: Configuration
-description: Required environment, local config files, restic repository choices, database settings, mounted file paths, retention, and scheduler flags.
+description: Required environment, optional local config files, restic repository choices, database settings, mounted file paths, retention, and scheduler flags.
 nav_order: 3
 ---
 
@@ -77,10 +77,9 @@ Use object storage credentials scoped to the backup bucket or prefix. They shoul
 
 ## Local config files
 
-`bundle exec kamal-backup init` creates two local config files:
+`bundle exec kamal-backup init` creates:
 
 - `config/kamal-backup.yml`
-- `config/kamal-backup.local.yml`
 
 `config/kamal-backup.yml` is the shared app-level file. Right now the main use is naming the accessory when it is not called `backup`:
 
@@ -88,7 +87,13 @@ Use object storage credentials scoped to the backup bucket or prefix. They shoul
 accessory: backup
 ```
 
-`config/kamal-backup.local.yml` is the local-machine file. It should describe your local restore and drill targets:
+For most Rails apps, no second file is needed. `kamal-backup` can infer local-machine targets from Rails conventions:
+
+- the development database from `config/database.yml`
+- the local files path as `storage`
+- the local state directory as `tmp/kamal-backup`
+
+If your local setup is nonstandard, create `config/kamal-backup.local.yml` and override the inferred targets there:
 
 ```yaml
 database_url: postgres://localhost/chatwithwork_development
@@ -110,7 +115,7 @@ When you run `restore local` or `drill local` with `-d` or `-c`, `kamal-backup` 
 
 That means the accessory clear env should contain the source-of-truth values for the backup repository and source file paths.
 
-You still keep local targets in `config/kamal-backup.local.yml`:
+Local overrides belong in `config/kamal-backup.local.yml` only when needed:
 
 - `DATABASE_URL` or `SQLITE_DATABASE_PATH`
 - `BACKUP_PATHS`
