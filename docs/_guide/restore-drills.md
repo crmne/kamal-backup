@@ -1,6 +1,6 @@
 ---
 title: Restore Drills
-description: Practice restores on your laptop or on production infrastructure, run checks, and keep evidence a reviewer can understand.
+description: Practice restores on your laptop or on production infrastructure, run checks, and keep evidence that reads like an operations record instead of a generic backup log.
 nav_order: 5
 ---
 
@@ -9,7 +9,7 @@ nav_order: 5
 `kamal-backup` has two drill destinations:
 
 - `drill local`: restore onto your machine, run an optional check, and write a drill record
-- `drill production`: restore into scratch targets on production infrastructure, run an optional check, and write a drill record
+- `drill production`: restore onto production infrastructure, but into scratch targets, then run an optional check and write a drill record
 
 Every drill writes the latest result to `KAMAL_BACKUP_STATE_DIR/last_restore_drill.json`. `kamal-backup evidence` includes that latest drill record.
 
@@ -18,18 +18,23 @@ Every drill writes the latest result to `KAMAL_BACKUP_STATE_DIR/last_restore_dri
 For a small Rails app, this is often the fastest proof that the backup is real:
 
 ```sh
-bundle exec exe/kamal-backup drill local latest --check "bin/rails runner 'puts User.count'"
+bundle exec kamal-backup -d production drill local latest --check "bin/rails runner 'puts User.count'"
 ```
 
-`drill local` uses:
+With `-d` or `-c`, `drill local` uses the production accessory config for the source side:
 
-- your local `DATABASE_URL` or `SQLITE_DATABASE_PATH`
-- your local `BACKUP_PATHS`
-- the configured restic repository
+- `APP_NAME`
+- `DATABASE_ADAPTER`
+- `RESTIC_REPOSITORY`
+- `LOCAL_RESTORE_SOURCE_PATHS`
+
+And it uses your local config or env for the target side:
+
+- `DATABASE_URL` or `SQLITE_DATABASE_PATH`
+- `BACKUP_PATHS`
+- local secrets
 
 It does the same restore work as `restore local`, then runs the optional check command and stores the result.
-
-If the production file paths differ from local ones, set `LOCAL_RESTORE_SOURCE_PATHS` to the production path list and keep `BACKUP_PATHS` pointed at the local paths.
 
 For larger apps, treat `drill local` as a convenience. The main drill should usually be `drill production`.
 
@@ -47,36 +52,42 @@ It does **not** restore into the live production database.
 PostgreSQL example:
 
 ```sh
-bin/kamal accessory exec backup \
-  "kamal-backup drill production latest --database app_restore_20260423 --files /restore/files --check 'test -d /restore/files/data/storage' --yes"
+bundle exec kamal-backup -d production drill production latest \
+  --database app_restore_20260423 \
+  --files /restore/files \
+  --check "test -d /restore/files/data/storage"
 ```
 
 MySQL/MariaDB example:
 
 ```sh
-bin/kamal accessory exec backup \
-  "kamal-backup drill production latest --database app_restore_20260423 --files /restore/files --check 'test -d /restore/files/data/storage' --yes"
+bundle exec kamal-backup -d production drill production latest \
+  --database app_restore_20260423 \
+  --files /restore/files \
+  --check "test -d /restore/files/data/storage"
 ```
 
 SQLite example:
 
 ```sh
-bin/kamal accessory exec backup \
-  "kamal-backup drill production latest --sqlite-path /restore/db/restore.sqlite3 --files /restore/files --check 'test -f /restore/db/restore.sqlite3' --yes"
+bundle exec kamal-backup -d production drill production latest \
+  --sqlite-path /restore/db/restore.sqlite3 \
+  --files /restore/files \
+  --check "test -f /restore/db/restore.sqlite3"
 ```
 
-For PostgreSQL and MySQL, if you omit `--database` in an interactive session, `kamal-backup` will ask for the scratch database name. Non-interactive runs should pass it explicitly.
+For PostgreSQL and MySQL, if you omit `--database` in an interactive session, `kamal-backup` asks for the scratch database name. Non-interactive runs should pass it explicitly.
 
 ## Scheduling
 
-Once you have settled on a scratch database name or SQLite path, it is reasonable to add a Kamal alias:
+Production drills are usually worth scheduling, but separately from ordinary backups. They have different runtime, different failure semantics, and different cleanup needs.
 
-```yaml
-aliases:
-  backup-drill: accessory exec backup "kamal-backup drill production latest --database app_restore_20260423 --files /restore/files --check 'test -d /restore/files/data/storage' --yes"
-```
+A typical review-friendly cadence is:
 
-That alias belongs in `deploy.yml` only after the scratch targets are real.
+1. scheduled backups
+2. regular `check`
+3. a deliberate `drill production`
+4. `evidence`
 
 ## What to Keep for CASA or Another Review
 
@@ -91,12 +102,5 @@ The human-readable story should usually say:
 - which scratch targets were used
 - which verification command ran
 - whether the result looked correct
-
-For many reviews, that is the useful sequence:
-
-1. scheduled backups
-2. repository checks
-3. a real restore drill
-4. `kamal-backup evidence`
 
 That is much stronger than saying "the backup job is green."

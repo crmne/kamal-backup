@@ -12,6 +12,7 @@ require_relative "evidence"
 require_relative "redactor"
 require_relative "restic"
 require_relative "scheduler"
+require_relative "schema"
 
 module KamalBackup
   class App
@@ -43,24 +44,6 @@ module KamalBackup
       end
 
       true
-    end
-
-    def restore_database(snapshot = "latest")
-      config.validate_restic
-
-      perform_database_restore(snapshot)
-      true
-    end
-
-    def restore_files(snapshot = "latest", target: "/restore/files")
-      config.validate_restic
-
-      perform_file_restore(snapshot, target: target)
-      true
-    end
-
-    def restore_local(snapshot = "latest")
-      restore_to_local_machine(snapshot)
     end
 
     def restore_to_local_machine(snapshot = "latest")
@@ -153,30 +136,39 @@ module KamalBackup
         Time.now.utc.strftime("%Y%m%dT%H%M%SZ")
       end
 
-      def build_restore_result(mode, snapshot)
+      def build_restore_result(scope, snapshot)
         started_at = Time.now.utc
-        result = {
+        result = Schema.record(
+          kind: "restore_result",
           status: "ok",
-          action: "restore",
-          mode: mode,
+          scope: scope,
           requested_snapshot: snapshot,
-          started_at: started_at.iso8601
-        }
+          started_at: started_at.iso8601,
+          finished_at: nil,
+          error: nil,
+          database: nil,
+          files: nil
+        )
         yield(result)
         result[:finished_at] = Time.now.utc.iso8601
         result
       end
 
-      def run_drill(mode, snapshot, check_command:)
+      def run_drill(scope, snapshot, check_command:)
         started_at = Time.now.utc
-        result = {
+        result = Schema.record(
+          kind: "drill_result",
           status: "ok",
-          action: "drill",
-          mode: mode,
+          scope: scope,
           operator: drill_operator,
           requested_snapshot: snapshot,
-          started_at: started_at.iso8601
-        }
+          started_at: started_at.iso8601,
+          finished_at: nil,
+          error: nil,
+          database: nil,
+          files: nil,
+          check: nil
+        )
 
         begin
           yield(result)
@@ -198,19 +190,6 @@ module KamalBackup
         end
 
         result
-      end
-
-      def perform_database_restore(snapshot)
-        adapter = database
-        resolved_snapshot = resolve_snapshot(snapshot, tags: ["type:database", "adapter:#{adapter.adapter_name}"])
-        filename = restic.database_file(resolved_snapshot, adapter.adapter_name)
-
-        if filename
-          adapter.restore(restic, resolved_snapshot, filename)
-          summarize_database_restore(adapter, resolved_snapshot, filename, adapter.restore_target_identifier)
-        else
-          raise ConfigurationError, "could not find database backup file in snapshot #{resolved_snapshot}"
-        end
       end
 
       def perform_database_restore_to_current(snapshot, adapter:)

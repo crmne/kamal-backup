@@ -1,7 +1,7 @@
 require_relative "test_helper"
 
 class IntegrationSqliteResticTest < Minitest::Test
-  def test_sqlite_and_file_backup_restore_with_local_restic_repository
+  def test_production_drill_restores_sqlite_and_files_into_scratch_targets
     skip "set KAMAL_BACKUP_RUN_INTEGRATION=1 to run restic integration tests" unless ENV["KAMAL_BACKUP_RUN_INTEGRATION"] == "1"
     skip "sqlite3 is required" unless system("which", "sqlite3", out: File::NULL)
     skip "restic is required" unless system("which", "restic", out: File::NULL)
@@ -29,8 +29,7 @@ class IntegrationSqliteResticTest < Minitest::Test
       )
 
       KamalBackup::App.new(env: env).backup
-      KamalBackup::App.new(env: env.merge("RESTORE_SQLITE_DATABASE_PATH" => restored_db)).restore_database("latest")
-      KamalBackup::App.new(env: env).restore_files("latest", target: restored_files)
+      KamalBackup::App.new(env: env).drill_on_production("latest", sqlite_path: restored_db, file_target: restored_files)
 
       output = `sqlite3 #{restored_db} "select name from items"`
       assert_equal "stored", output.strip

@@ -1,6 +1,7 @@
 require "json"
 require "time"
 require_relative "command"
+require_relative "schema"
 require_relative "version"
 
 module KamalBackup
@@ -12,7 +13,8 @@ module KamalBackup
     end
 
     def to_h
-      {
+      Schema.record(
+        kind: "evidence",
         app_name: @config.app_name,
         generated_at: Time.now.utc.iso8601,
         database_adapter: @config.database_adapter,
@@ -26,7 +28,7 @@ module KamalBackup
         last_restore_drill: last_restore_drill,
         image_version: VERSION,
         tool_versions: tool_versions
-      }
+      )
     end
 
     def to_json(*args)

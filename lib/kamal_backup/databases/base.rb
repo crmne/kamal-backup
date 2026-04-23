@@ -32,11 +32,6 @@ module KamalBackup
         )
       end
 
-      def restore(restic, snapshot, filename)
-        validate_restore_target
-        restic.pipe_dump_to_command(snapshot, filename, restore_command)
-      end
-
       def restore_to_current(restic, snapshot, filename)
         restic.pipe_dump_to_command(snapshot, filename, current_restore_command)
       end
@@ -67,10 +62,6 @@ module KamalBackup
         raise NotImplementedError
       end
 
-      def restore_command
-        raise NotImplementedError
-      end
-
       def current_restore_command
         raise NotImplementedError
       end
@@ -79,16 +70,8 @@ module KamalBackup
         raise NotImplementedError
       end
 
-      def validate_restore_target
-        config.validate_database_restore_target(restore_target_identifier)
-      end
-
       def validate_scratch_restore_target(target)
         config.validate_database_restore_target(scratch_target_identifier(target))
-      end
-
-      def restore_target_identifier
-        raise NotImplementedError
       end
 
       def current_target_identifier

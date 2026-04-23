@@ -31,28 +31,6 @@ class DatabaseAdaptersTest < Minitest::Test
     )
   end
 
-  def test_postgres_restore_uses_restore_database_url
-    config = KamalBackup::Config.new(env: base_env(
-      "DATABASE_ADAPTER" => "postgres",
-      "DATABASE_URL" => "postgres://app:secret@db/app",
-      "RESTORE_DATABASE_URL" => "postgres://app:secret@db/app_restore"
-    ))
-    adapter = KamalBackup::Databases::Postgres.new(config, redactor: redactor)
-    command = adapter.restore_command
-
-    assert_includes command.argv, "app_restore"
-    refute_includes command.argv.join(" "), "secret"
-    assert_equal(
-      {
-        "PGHOST" => "db",
-        "PGUSER" => "app",
-        "PGPASSWORD" => "secret",
-        "PGDATABASE" => "app_restore"
-      },
-      command.env
-    )
-  end
-
   def test_postgres_current_restore_uses_current_database_url
     config = KamalBackup::Config.new(env: base_env(
       "DATABASE_ADAPTER" => "postgres",
@@ -86,16 +64,17 @@ class DatabaseAdaptersTest < Minitest::Test
     assert_equal "app_restore_20260423", command.env.fetch("PGDATABASE")
   end
 
-  def test_postgres_restore_target_identifier_keeps_url_for_exact_safety_check
+  def test_postgres_scratch_restore_refuses_the_current_database
     config = KamalBackup::Config.new(env: base_env(
       "DATABASE_ADAPTER" => "postgres",
-      "DATABASE_URL" => "postgres://app:secret@db/app",
-      "RESTORE_DATABASE_URL" => "postgres://app:secret@db/app"
+      "DATABASE_URL" => "postgres://app:secret@db/app"
     ))
     adapter = KamalBackup::Databases::Postgres.new(config, redactor: redactor)
 
-    error = assert_raises(KamalBackup::ConfigurationError) { adapter.validate_restore_target }
-    assert_match(/production-looking restore target/, error.message)
+    error = assert_raises(KamalBackup::ConfigurationError) do
+      adapter.send(:validate_scratch_restore_target, "app")
+    end
+    assert_match(/scratch database must differ/, error.message)
   end
 
   def test_mysql_dump_command_uses_transaction_safe_options_and_password_env
@@ -115,21 +94,6 @@ class DatabaseAdaptersTest < Minitest::Test
     assert_includes command.argv, "--events"
     assert_includes command.argv, "app_test"
     assert_equal({ "MYSQL_PWD" => "secret" }, command.env)
-  end
-
-  def test_mysql_restore_uses_restore_database_url
-    config = KamalBackup::Config.new(env: base_env(
-      "DATABASE_ADAPTER" => "mysql",
-      "DATABASE_URL" => "mysql2://app:secret@mysql:3306/app_test",
-      "RESTORE_DATABASE_URL" => "mysql2://restore:restore-secret@mysql:3306/app_restore",
-      "MYSQL_CLIENT_BIN" => "mysql"
-    ))
-    adapter = KamalBackup::Databases::Mysql.new(config, redactor: redactor)
-    command = adapter.restore_command
-
-    assert_equal "mysql", command.argv.first
-    assert_includes command.argv, "app_restore"
-    assert_equal({ "MYSQL_PWD" => "restore-secret" }, command.env)
   end
 
   def test_mysql_current_restore_uses_current_database_url
@@ -160,20 +124,18 @@ class DatabaseAdaptersTest < Minitest::Test
     assert_equal({ "MYSQL_PWD" => "secret" }, command.env)
   end
 
-  def test_sqlite_refuses_in_place_restore_without_flag
-    Dir.mktmpdir do |dir|
-      source = File.join(dir, "app.sqlite3")
-      File.write(source, "")
-      config = KamalBackup::Config.new(env: base_env(
-        "DATABASE_ADAPTER" => "sqlite",
-        "SQLITE_DATABASE_PATH" => source,
-        "RESTORE_SQLITE_DATABASE_PATH" => source
-      ))
-      adapter = KamalBackup::Databases::Sqlite.new(config, redactor: redactor)
+  def test_mysql_scratch_restore_refuses_the_current_database
+    config = KamalBackup::Config.new(env: base_env(
+      "DATABASE_ADAPTER" => "mysql",
+      "DATABASE_URL" => "mysql2://app:secret@mysql:3306/app_production",
+      "MYSQL_CLIENT_BIN" => "mysql"
+    ))
+    adapter = KamalBackup::Databases::Mysql.new(config, redactor: redactor)
 
-      error = assert_raises(KamalBackup::ConfigurationError) { adapter.send(:validate_restore_target) }
-      assert_match(/in-place SQLite restore/, error.message)
+    error = assert_raises(KamalBackup::ConfigurationError) do
+      adapter.send(:validate_scratch_restore_target, "app_production")
     end
+    assert_match(/scratch database must differ/, error.message)
   end
 
   def test_sqlite_current_restore_uses_the_configured_database_path

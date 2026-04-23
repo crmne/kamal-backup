@@ -60,9 +60,79 @@ jobs:
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
 
+  gem:
+    runs-on: ubuntu-latest
+    needs: test
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: "3.3"
+          bundler-cache: true
+
+      - name: Build gem
+        run: gem build kamal-backup.gemspec
+
+      - name: Inspect gem
+        run: |
+          ruby -rrubygems/package -e '
+            spec = Gem::Package.new(Dir["kamal-backup-*.gem"].first).spec
+            puts "name=#{spec.name}"
+            puts "version=#{spec.version}"
+            puts "summary=#{spec.summary}"
+            puts "executables=#{spec.executables.join(",")}"
+          '
+
+      - name: Check if version needs publishing
+        if: github.event_name != 'pull_request' && github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+        id: check_version
+        run: |
+          set -euo pipefail
+
+          VERSION=$(ruby -r ./lib/kamal_backup/version -e 'puts KamalBackup::VERSION')
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+          GEM_NAME="kamal-backup"
+          ALL_PUBLISHED_VERSIONS=$(( \
+            gem list ^${GEM_NAME}$ -r --all 2>/dev/null || true; \
+            gem list ^${GEM_NAME}$ -r --prerelease 2>/dev/null || true; \
+          ) | sed -n 's/.*(\(.*\)).*/\1/p' \
+            | tr ',' '\n' \
+            | sed 's/^[[:space:]]*//;s/[[:space:]]*$//' \
+            | grep . \
+            | sort -u )
+
+          if echo "$ALL_PUBLISHED_VERSIONS" | grep -Fxq "$VERSION"; then
+            echo "version_changed=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "version_changed=true" >> "$GITHUB_OUTPUT"
+          fi
+        shell: bash
+
+      - name: Publish to RubyGems
+        if: steps.check_version.outputs.version_changed == 'true'
+        run: |
+          mkdir -p "$HOME/.gem"
+          touch "$HOME/.gem/credentials"
+          chmod 0600 "$HOME/.gem/credentials"
+          printf -- "---\n:rubygems_api_key: ${GEM_HOST_API_KEY}\n" > "$HOME/.gem/credentials"
+          output=$(gem push "kamal-backup-${VERSION}.gem" 2>&1) || {
+            echo "$output"
+            if echo "$output" | grep -q "Repushing of gem versions is not allowed"; then
+              echo "Version already exists on RubyGems, skipping"
+              exit 0
+            else
+              exit 1
+            fi
+          }
+        env:
+          GEM_HOST_API_KEY: ${{ secrets.RUBYGEMS_AUTH_TOKEN }}
+          VERSION: ${{ steps.check_version.outputs.version }}
+
   release:
     runs-on: ubuntu-latest
-    needs: [test, image]
+    needs: [test, image, gem]
     permissions:
       contents: write
     steps:

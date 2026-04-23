@@ -1,46 +1,28 @@
 ---
 title: Commands
-description: Command reference for the kamal-backup executable and the most common Kamal alias flows.
+description: Command reference for the kamal-backup executable, including Kamal-style destination selection for production-side commands.
 nav_order: 1
 ---
 
-## CLI
+## Main shape
 
-Production-side commands normally run inside the backup accessory:
+The local gem is the operator-facing interface.
 
-```sh
-bin/kamal accessory exec backup "kamal-backup evidence"
-```
-
-With the recommended aliases from the getting-started guide, the same command becomes:
+Use `-d` and `-c` the same way you use them with Kamal:
 
 ```sh
-bin/kamal backup-evidence
+bundle exec kamal-backup -d production backup
+bundle exec kamal-backup -d production evidence
+bundle exec kamal-backup -c config/deploy.staging.yml -d staging check
+bundle exec kamal-backup restore local latest
 ```
 
-Recommended Kamal aliases:
+Production-side commands shell out through Kamal to the backup accessory. Local commands run on your machine.
 
-```yaml
-aliases:
-  backup: accessory exec backup "kamal-backup backup"
-  backup-list: accessory exec backup "kamal-backup list"
-  backup-check: accessory exec backup "kamal-backup check"
-  backup-evidence: accessory exec backup "kamal-backup evidence"
-  backup-version: accessory exec backup "kamal-backup version"
-  backup-schedule: accessory exec backup "kamal-backup schedule"
-  backup-logs: accessory logs backup -f
-```
-
-Optional drill alias after you have chosen scratch targets:
-
-```yaml
-aliases:
-  backup-drill: accessory exec backup "kamal-backup drill production latest --database app_restore_20260423 --files /restore/files --check 'test -d /restore/files/data/storage' --yes"
-```
-
-The operator-facing command surface is:
+The command surface is:
 
 ```sh
+kamal-backup init
 kamal-backup backup
 kamal-backup restore local [snapshot-or-latest]
 kamal-backup restore production [snapshot-or-latest]
@@ -55,20 +37,21 @@ kamal-backup version
 
 Use `kamal-backup help`, `kamal-backup help restore`, or `kamal-backup help drill` for task-specific usage.
 
-## Commands
+## Common commands
 
 | Command | Description |
 |---|---|
-| `backup` | Create one database backup and one file snapshot for the current app. It runs `forget --prune` afterward unless `RESTIC_FORGET_AFTER_BACKUP=false`. |
-| `restore local [snapshot-or-latest]` | Restore onto your machine: current local database plus current local `BACKUP_PATHS`. Prompts before overwriting local data. |
-| `restore production [snapshot-or-latest]` | Restore back into the live production database and production `BACKUP_PATHS`. Prompts before overwriting production data. |
-| `drill local [snapshot-or-latest]` | Restore onto your machine, optionally run `--check`, print JSON, and store the latest drill record under `KAMAL_BACKUP_STATE_DIR`. |
+| `init` | Create `config/kamal-backup.yml` and `config/kamal-backup.local.yml`, then print an accessory snippet for `deploy.yml`. |
+| `backup` | Create one database backup and one file snapshot for the current app. With `-d` or `-c`, it runs on production infrastructure through Kamal. |
+| `restore local [snapshot-or-latest]` | Restore onto your machine: current local database plus current local `BACKUP_PATHS`. Prompts before overwriting local data. With `-d` or `-c`, the source-side defaults come from the production accessory config. |
+| `restore production [snapshot-or-latest]` | Restore back into the live production database and production `BACKUP_PATHS`. Prompts before overwriting production data. With `-d` or `-c`, it shells out through Kamal. |
+| `drill local [snapshot-or-latest]` | Restore onto your machine, optionally run `--check`, print JSON, and store the latest drill record under `KAMAL_BACKUP_STATE_DIR`. With `-d` or `-c`, the source-side defaults come from the production accessory config. |
 | `drill production [snapshot-or-latest]` | Restore into scratch targets on production infrastructure, optionally run `--check`, print JSON, and store the latest drill record. Use `--database` for PostgreSQL/MySQL or `--sqlite-path` for SQLite. |
-| `list` | Show restic snapshots for the configured app tags. |
-| `check` | Run `restic check` and store the latest result under `KAMAL_BACKUP_STATE_DIR`. |
-| `evidence` | Print redacted JSON you can attach to ops records or security reviews, including latest snapshots, latest check result, latest drill result, retention, and tool versions. |
-| `schedule` | Run the foreground scheduler loop used by the Docker image default command. |
-| `version` | Print the running `kamal-backup` version. `--version` and `-v` do the same. |
+| `list` | Show restic snapshots for the configured app tags. With `-d` or `-c`, it runs through Kamal against the backup accessory. |
+| `check` | Run `restic check` and store the latest result under `KAMAL_BACKUP_STATE_DIR`. With `-d` or `-c`, it runs through Kamal against the backup accessory. |
+| `evidence` | Print redacted JSON for ops records or security reviews, including latest snapshots, latest check result, latest drill result, retention, and tool versions. With `-d` or `-c`, it runs through Kamal against the backup accessory. |
+| `schedule` | Run the foreground scheduler loop. Normally the accessory container runs this by default, but you can also invoke it explicitly through `-d` or `-c` when debugging. |
+| `version` | Print the running `kamal-backup` version. `--version` and `-v` print the local gem version. `version` with `-d` or `-c` prints the production accessory version. |
 
 ## Notes
 

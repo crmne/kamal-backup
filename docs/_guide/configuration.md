@@ -1,6 +1,6 @@
 ---
 title: Configuration
-description: Required environment, restic repository choices, database settings, mounted file paths, retention, and scheduler flags.
+description: Required environment, local config files, restic repository choices, database settings, mounted file paths, retention, and scheduler flags.
 nav_order: 3
 ---
 
@@ -20,7 +20,7 @@ RESTIC_REPOSITORY=/var/backups/chatwithwork
 
 If you use a `rest:` repository, the restic REST server is a separate service. `kamal-backup` talks to it, but does not install or operate it for you.
 
-## Core environment
+## Core accessory environment
 
 ```sh
 APP_NAME=chatwithwork
@@ -75,6 +75,55 @@ AWS_DEFAULT_REGION=...
 
 Use object storage credentials scoped to the backup bucket or prefix. They should not have access to unrelated buckets.
 
+## Local config files
+
+`bundle exec kamal-backup init` creates two local config files:
+
+- `config/kamal-backup.yml`
+- `config/kamal-backup.local.yml`
+
+`config/kamal-backup.yml` is the shared app-level file. Right now the main use is naming the accessory when it is not called `backup`:
+
+```yaml
+accessory: backup
+```
+
+`config/kamal-backup.local.yml` is the local-machine file. It should describe your local restore and drill targets:
+
+```yaml
+database_url: postgres://localhost/chatwithwork_development
+backup_paths:
+  - storage
+state_dir: tmp/kamal-backup
+```
+
+Environment variables still win over file values. That lets you keep non-secret defaults in the file and keep secrets in env, `direnv`, or another local secret manager.
+
+## Local restore and drill source defaults
+
+When you run `restore local` or `drill local` with `-d` or `-c`, `kamal-backup` reads the production-side source settings from `kamal config`:
+
+- `APP_NAME`
+- `DATABASE_ADAPTER`
+- `RESTIC_REPOSITORY`
+- `BACKUP_PATHS`, remapped to `LOCAL_RESTORE_SOURCE_PATHS`
+
+That means the accessory clear env should contain the source-of-truth values for the backup repository and source file paths.
+
+You still keep local targets in `config/kamal-backup.local.yml`:
+
+- `DATABASE_URL` or `SQLITE_DATABASE_PATH`
+- `BACKUP_PATHS`
+- optional `state_dir`
+
+And you still keep secrets in env:
+
+- `RESTIC_PASSWORD`
+- cloud credentials
+- local DB passwords
+
+If you do not pass `-d` or `-c`, you can set `RESTIC_REPOSITORY` and `LOCAL_RESTORE_SOURCE_PATHS` locally too.
+
 ## Retention and pruning
 
 Defaults:
@@ -109,24 +158,9 @@ RESTIC_CHECK_AFTER_BACKUP=false
 RESTIC_CHECK_READ_DATA_SUBSET=5%
 ```
 
-## Local restore settings
+## Rare overrides
 
-`restore local` and `drill local` use the same core environment as backups:
-
-- `RESTIC_REPOSITORY`
-- `RESTIC_PASSWORD`
-- `DATABASE_URL` or `SQLITE_DATABASE_PATH`
-- `BACKUP_PATHS`
-
-If the production file paths differ from the local ones, add:
-
-```sh
-LOCAL_RESTORE_SOURCE_PATHS=/data/storage
-```
-
-That tells `kamal-backup` which paths to look for inside the restored file snapshot before replacing your local `BACKUP_PATHS`.
-
-Rare override:
+For local safety guards, a rare override still exists:
 
 ```sh
 KAMAL_BACKUP_ALLOW_PRODUCTION_RESTORE=true

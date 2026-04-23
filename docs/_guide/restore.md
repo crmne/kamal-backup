@@ -1,6 +1,6 @@
 ---
 title: Restore
-description: Restore backups onto your local machine or back into production, with clear expectations about what each command touches.
+description: Restore backups onto your local machine or back into production, with the same local-vs-production meaning everywhere in the CLI and docs.
 nav_order: 4
 ---
 
@@ -9,23 +9,34 @@ nav_order: 4
 `kamal-backup` has two restore destinations:
 
 - `restore local`: run on your machine, restore into your local database and local file paths
-- `restore production`: run from the backup accessory, restore back into the live production database and production file paths
+- `restore production`: run on production infrastructure, restore back into the live production database and production file paths
 
-That distinction matters. `local` means your machine. `production` means the production-side accessory and live production targets.
+That distinction is strict. `local` means your machine. `production` means the production-side accessory context.
 
 ## `restore local`
 
 This is the fast way to pull a production backup down into local development.
 
+When you pass `-d` or `-c`, `kamal-backup` asks Kamal for the backup accessory config and uses that as the source of truth for:
+
+- `APP_NAME`
+- `DATABASE_ADAPTER`
+- `RESTIC_REPOSITORY`
+- `LOCAL_RESTORE_SOURCE_PATHS` from the accessory `BACKUP_PATHS`
+
+You still provide the local targets yourself in `config/kamal-backup.local.yml` or env:
+
+- `DATABASE_URL` or `SQLITE_DATABASE_PATH`
+- `BACKUP_PATHS`
+- local secrets such as `RESTIC_PASSWORD` and DB passwords
+
+Example:
+
 ```sh
-bundle exec exe/kamal-backup restore local latest
+bundle exec kamal-backup -d production restore local latest
 ```
 
-What it needs on your machine:
-
-- access to the restic repository through `RESTIC_REPOSITORY` and `RESTIC_PASSWORD`
-- local database settings through `DATABASE_URL` or `SQLITE_DATABASE_PATH`
-- local file targets through `BACKUP_PATHS`
+Without `-d` or `-c`, `restore local` reads everything from local config and env.
 
 What it does:
 
@@ -33,41 +44,38 @@ What it does:
 - restores the latest file snapshot into a temporary staging directory
 - replaces the local `BACKUP_PATHS` with the restored copy
 
-If the production file paths differ from your local file paths, set `LOCAL_RESTORE_SOURCE_PATHS` to the production path list and leave `BACKUP_PATHS` pointed at your local targets.
+Example local file:
 
-Example:
-
-```sh
-export APP_NAME=chatwithwork
-export DATABASE_ADAPTER=postgres
-export DATABASE_URL=postgres://localhost/chatwithwork_development
-export BACKUP_PATHS=storage
-export LOCAL_RESTORE_SOURCE_PATHS=/data/storage
-export RESTIC_REPOSITORY=s3:https://s3.example.com/chatwithwork-backups
-export RESTIC_PASSWORD=change-me
-
-bundle exec exe/kamal-backup restore local latest
+```yaml
+database_url: postgres://localhost/chatwithwork_development
+backup_paths:
+  - storage
+state_dir: tmp/kamal-backup
 ```
 
-`restore local` refuses to run when `RAILS_ENV`, `RACK_ENV`, `APP_ENV`, or `KAMAL_ENVIRONMENT` is set to `production` unless you explicitly override that with `KAMAL_BACKUP_ALLOW_PRODUCTION_RESTORE=true`.
+If the production file paths differ from your local file paths and you are not using `-d` or `-c`, set `LOCAL_RESTORE_SOURCE_PATHS` yourself.
+
+`restore local` refuses to run when `RAILS_ENV`, `RACK_ENV`, `APP_ENV`, or `KAMAL_ENVIRONMENT` is set to `production` unless you explicitly override that guard.
 
 ## `restore production`
 
 This is the emergency path: restore back into the live production database and live production file paths.
 
-Run it from the backup accessory:
+From your app checkout:
 
 ```sh
-bin/kamal accessory exec backup "kamal-backup restore production latest"
+bundle exec kamal-backup -d production restore production latest
 ```
 
-The command prompts for confirmation. For a scripted run, add `--yes`:
+That command prompts locally, then shells out through Kamal to the backup accessory and runs:
 
 ```sh
-bin/kamal accessory exec backup "kamal-backup restore production latest --yes"
+kamal-backup restore production latest --yes
 ```
 
-What it uses:
+If you are already inside the accessory container, you can run the command directly there too.
+
+This path uses:
 
 - the accessory's current `DATABASE_URL` or `SQLITE_DATABASE_PATH`
 - the accessory's current `BACKUP_PATHS`
@@ -77,13 +85,11 @@ This is intentionally not a quiet operation. `restore production` is for real in
 
 ## Prompts and Safety
 
-`restore` no longer depends on a separate "allow restore" environment flag.
-
-Instead, the safety model is:
+The safety model is:
 
 - you must choose `local` or `production`
 - destructive restores prompt for confirmation
 - automation must pass `--yes`
 - local restores refuse production-looking local targets unless you explicitly override them
 
-That keeps the interface closer to Kamal itself: explicit command, explicit target, deliberate confirmation.
+That keeps the interface close to Kamal itself: explicit command, explicit target, deliberate confirmation.

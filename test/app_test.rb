@@ -70,13 +70,12 @@ class AppTest < Minitest::Test
   end
 
   class FakeDatabase
-    attr_reader :backup_calls, :restore_calls, :current_restore_calls, :scratch_restore_calls
+    attr_reader :backup_calls, :current_restore_calls, :scratch_restore_calls
 
     def initialize(adapter_name: "sqlite", current_target_identifier: nil)
       @adapter_name = adapter_name
       @current_target_identifier = current_target_identifier || default_current_target_identifier(adapter_name)
       @backup_calls = []
-      @restore_calls = []
       @current_restore_calls = []
       @scratch_restore_calls = []
     end
@@ -89,20 +88,12 @@ class AppTest < Minitest::Test
       @backup_calls << { restic: restic, timestamp: timestamp }
     end
 
-    def restore(restic, snapshot, filename)
-      @restore_calls << { restic: restic, snapshot: snapshot, filename: filename }
-    end
-
     def restore_to_current(restic, snapshot, filename)
       @current_restore_calls << { restic: restic, snapshot: snapshot, filename: filename }
     end
 
     def restore_to_scratch(restic, snapshot, filename, target:)
       @scratch_restore_calls << { restic: restic, snapshot: snapshot, filename: filename, target: target }
-    end
-
-    def restore_target_identifier
-      "postgres://restore@example.test/app_restore"
     end
 
     def current_target_identifier
@@ -214,49 +205,6 @@ class AppTest < Minitest::Test
     end
   end
 
-  def test_restore_database_uses_latest_snapshot_for_the_selected_adapter
-    restic = FakeRestic.new
-    database = FakeDatabase.new(adapter_name: "postgres")
-    app = KamalBackup::App.new(
-      env: base_env(
-        "DATABASE_ADAPTER" => "postgres",
-        "DATABASE_URL" => "postgres://app@db/app_production"
-      ),
-      restic: restic,
-      database: database
-    )
-
-    app.restore_database("latest")
-
-    assert_equal [%w[type:database adapter:postgres]], restic.latest_snapshot_calls
-    assert_equal [{ snapshot: "latest-database-snapshot", adapter: "postgres" }], restic.database_file_calls
-    assert_equal 1, database.restore_calls.size
-    assert_equal "latest-database-snapshot", database.restore_calls.first.fetch(:snapshot)
-    assert_equal "database.dump", database.restore_calls.first.fetch(:filename)
-  end
-
-  def test_restore_files_uses_latest_snapshot_and_expands_the_target_path
-    Dir.mktmpdir do |dir|
-      files = File.join(dir, "storage")
-      target = File.join(dir, "restored-files")
-      FileUtils.mkdir_p(files)
-
-      restic = FakeRestic.new
-      app = KamalBackup::App.new(
-        env: base_env(
-          "BACKUP_PATHS" => files
-        ),
-        restic: restic,
-        database: FakeDatabase.new
-      )
-
-      app.restore_files("latest", target: target)
-
-      assert_equal [%w[type:files]], restic.latest_snapshot_calls
-      assert_equal [{ snapshot: "latest-files-snapshot", target: File.expand_path(target) }], restic.restore_snapshot_calls
-    end
-  end
-
   def test_restore_to_local_machine_restores_database_and_replaces_backup_paths
     Dir.mktmpdir do |dir|
       db = File.join(dir, "app_development.sqlite3")
@@ -291,7 +239,9 @@ class AppTest < Minitest::Test
       assert_equal 1, restic.restore_snapshot_calls.size
       assert_equal "latest-files-snapshot", restic.restore_snapshot_calls.first.fetch(:snapshot)
       refute_equal File.expand_path(files), restic.restore_snapshot_calls.first.fetch(:target)
-      assert_equal "local", result.fetch(:mode)
+      assert_equal 1, result.fetch(:schema_version)
+      assert_equal "restore_result", result.fetch(:kind)
+      assert_equal "local", result.fetch(:scope)
       assert_equal "hello from backup", File.read(File.join(files, "hello.txt"))
       refute File.exist?(old_file)
     end
@@ -322,7 +272,9 @@ class AppTest < Minitest::Test
 
       result = app.restore_to_production("latest")
 
-      assert_equal "production", result.fetch(:mode)
+      assert_equal 1, result.fetch(:schema_version)
+      assert_equal "restore_result", result.fetch(:kind)
+      assert_equal "production", result.fetch(:scope)
       assert_equal 1, database.current_restore_calls.size
       assert_equal "hello from production backup", File.read(File.join(files, "hello.txt"))
       refute File.exist?(old_file)
@@ -354,7 +306,9 @@ class AppTest < Minitest::Test
       )
 
       assert_equal "ok", result.fetch(:status)
-      assert_equal "production", result.fetch(:mode)
+      assert_equal 1, result.fetch(:schema_version)
+      assert_equal "drill_result", result.fetch(:kind)
+      assert_equal "production", result.fetch(:scope)
       assert_equal "latest-database-snapshot", result.fetch(:database).fetch(:snapshot)
       assert_equal "postgres", result.fetch(:database).fetch(:adapter)
       assert_equal File.expand_path(target), result.fetch(:files).fetch(:target)
@@ -395,7 +349,9 @@ class AppTest < Minitest::Test
       persisted = JSON.parse(File.read(File.join(state, "last_restore_drill.json")))
 
       assert_equal "failed", result.fetch(:status)
-      assert_equal "local", result.fetch(:mode)
+      assert_equal 1, result.fetch(:schema_version)
+      assert_equal "drill_result", result.fetch(:kind)
+      assert_equal "local", result.fetch(:scope)
       assert_equal "failed", result.fetch(:check).fetch(:status)
       assert_includes result.fetch(:error), "command failed"
       assert_equal "failed", persisted.fetch("status")

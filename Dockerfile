@@ -14,7 +14,8 @@ RUN apt-get update \
 
 WORKDIR /app
 
-COPY Gemfile Gemfile.lock ./
+COPY Gemfile Gemfile.lock kamal-backup.gemspec ./
+COPY lib/kamal_backup/version.rb ./lib/kamal_backup/version.rb
 
 RUN bundle config set without "test" \
   && bundle install

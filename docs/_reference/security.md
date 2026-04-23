@@ -37,6 +37,7 @@ Restore commands are explicit and deliberate:
 - destructive restore commands prompt for confirmation unless `--yes` is passed
 - local restores refuse production-looking local targets unless `KAMAL_BACKUP_ALLOW_PRODUCTION_RESTORE=true`
 - production drills restore into scratch targets, not the live production database
+- production-side commands can be run from the local gem with `-d` or `-c`, but the destructive work still happens on the backup accessory with the same explicit command surface
 
 Production-looking targets are refused unless `KAMAL_BACKUP_ALLOW_PRODUCTION_RESTORE=true`.
 

@@ -25,6 +25,52 @@ class ConfigTest < Minitest::Test
     assert_equal ["/data/storage", "/data/uploads", "/data/other"], config.backup_paths
   end
 
+  def test_loads_local_yaml_config_from_the_current_project
+    Dir.mktmpdir do |dir|
+      config_dir = File.join(dir, "config")
+      FileUtils.mkdir_p(config_dir)
+      File.write(
+        File.join(config_dir, "kamal-backup.local.yml"),
+        <<~YAML
+          app_name: local-app
+          database_adapter: sqlite
+          sqlite_database_path: tmp/development.sqlite3
+          backup_paths:
+            - storage
+            - tmp/uploads
+          local_restore_source_paths:
+            - /data/storage
+            - /data/uploads
+        YAML
+      )
+
+      config = KamalBackup::Config.new(env: { "RESTIC_REPOSITORY" => "/tmp/restic", "RESTIC_PASSWORD" => "secret" }, cwd: dir)
+
+      assert_equal "local-app", config.app_name
+      assert_equal "sqlite", config.database_adapter
+      assert_equal "tmp/development.sqlite3", config.value("SQLITE_DATABASE_PATH")
+      assert_equal ["storage", "tmp/uploads"], config.backup_paths
+      assert_equal ["/data/storage", "/data/uploads"], config.local_restore_source_paths
+    end
+  end
+
+  def test_environment_overrides_local_yaml_config
+    Dir.mktmpdir do |dir|
+      config_dir = File.join(dir, "config")
+      FileUtils.mkdir_p(config_dir)
+      File.write(
+        File.join(config_dir, "kamal-backup.local.yml"),
+        <<~YAML
+          app_name: file-app
+        YAML
+      )
+
+      config = KamalBackup::Config.new(env: { "APP_NAME" => "env-app" }, cwd: dir)
+
+      assert_equal "env-app", config.app_name
+    end
+  end
+
   def test_refuses_suspicious_backup_path
     config = KamalBackup::Config.new(env: base_env("DATABASE_ADAPTER" => "postgres", "DATABASE_URL" => "postgres://app@db/app", "BACKUP_PATHS" => "/"))
 

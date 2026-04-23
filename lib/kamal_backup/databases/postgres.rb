@@ -19,15 +19,6 @@ module KamalBackup
         PGPASSFILE
       ].freeze
 
-      RESTORE_ENV_MAP = {
-        "RESTORE_PGHOST" => "PGHOST",
-        "RESTORE_PGPORT" => "PGPORT",
-        "RESTORE_PGUSER" => "PGUSER",
-        "RESTORE_PGPASSWORD" => "PGPASSWORD",
-        "RESTORE_PGDATABASE" => "PGDATABASE",
-        "RESTORE_PGSSLMODE" => "PGSSLMODE"
-      }.freeze
-
       def adapter_name
         "postgres"
       end
@@ -39,15 +30,6 @@ module KamalBackup
       def dump_command
         argv = %w[pg_dump --format=custom --no-owner --no-privileges]
         CommandSpec.new(argv: argv, env: current_connection)
-      end
-
-      def restore_command
-        connection = restore_connection
-        database = connection.fetch("PGDATABASE")
-
-        argv = %w[pg_restore --clean --if-exists --no-owner --no-privileges --dbname]
-        argv << database
-        CommandSpec.new(argv: argv, env: connection)
       end
 
       def current_restore_command
@@ -65,10 +47,6 @@ module KamalBackup
         argv = %w[pg_restore --clean --if-exists --no-owner --no-privileges --dbname]
         argv << target
         CommandSpec.new(argv: argv, env: connection)
-      end
-
-      def restore_target_identifier
-        value("RESTORE_DATABASE_URL") || value("RESTORE_PGDATABASE")
       end
 
       def current_target_identifier
@@ -93,26 +71,9 @@ module KamalBackup
             connection_from_url(value("DATABASE_URL"), "DATABASE_URL")
           else
             connection = prefixed_env("", SOURCE_ENV_KEYS)
-            raise ConfigurationError, "DATABASE_URL or PGDATABASE is required for PostgreSQL local restore" unless connection["PGDATABASE"]
+            raise ConfigurationError, "DATABASE_URL or PGDATABASE is required for PostgreSQL restore" unless connection["PGDATABASE"]
 
             connection
-          end
-        end
-
-        def restore_connection
-          if value("RESTORE_DATABASE_URL")
-            connection_from_url(value("RESTORE_DATABASE_URL"), "RESTORE_DATABASE_URL")
-          else
-            connection = restore_env
-            raise ConfigurationError, "RESTORE_DATABASE_URL or RESTORE_PGDATABASE is required for PostgreSQL restore" unless connection["PGDATABASE"]
-
-            connection
-          end
-        end
-
-        def restore_env
-          RESTORE_ENV_MAP.each_with_object({}) do |(source, target), env|
-            env[target] = value(source) if value(source)
           end
         end
 

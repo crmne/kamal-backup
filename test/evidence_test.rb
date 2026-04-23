@@ -22,7 +22,7 @@ class EvidenceTest < Minitest::Test
       ))
       File.write(
         config.last_restore_drill_path,
-        JSON.pretty_generate({ status: "ok", mode: "local", finished_at: "2026-04-23T11:00:00Z" })
+        JSON.pretty_generate({ schema_version: 1, kind: "drill_result", status: "ok", scope: "local", finished_at: "2026-04-23T11:00:00Z" })
       )
 
       evidence = KamalBackup::Evidence.new(
@@ -31,8 +31,10 @@ class EvidenceTest < Minitest::Test
         redactor: KamalBackup::Redactor.new(env: {})
       ).to_h
 
+      assert_equal 1, evidence.fetch(:schema_version)
+      assert_equal "evidence", evidence.fetch(:kind)
       assert_equal "ok", evidence.fetch(:last_restore_drill).fetch("status")
-      assert_equal "local", evidence.fetch(:last_restore_drill).fetch("mode")
+      assert_equal "local", evidence.fetch(:last_restore_drill).fetch("scope")
     end
   end
 end

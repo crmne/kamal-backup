@@ -1,6 +1,6 @@
 ---
 title: Getting Started
-description: Add kamal-backup as a Kamal accessory, choose a restic repository, and run the first backup.
+description: Install the gem, add the backup accessory, generate local config stubs, and run the first backup with Kamal-style destination selection.
 nav_order: 1
 ---
 
@@ -10,9 +10,33 @@ This guide assumes:
 - your database is PostgreSQL, MySQL/MariaDB, or SQLite;
 - any file data you want to back up is available on a mounted path such as `/data/storage`.
 
-In normal Kamal use, there is no app-host installation step for restic. The `kamal-backup` image already includes it.
+In normal Kamal use, restic runs inside the backup accessory image. You do not install restic on the Rails app host.
 
-## Choose a restic repository
+## 1. Add the gem
+
+In the Rails app:
+
+```ruby
+group :development do
+  gem "kamal-backup"
+end
+```
+
+Then install it and generate the config stubs:
+
+```sh
+bundle install
+bundle exec kamal-backup init
+```
+
+That creates:
+
+- `config/kamal-backup.yml`
+- `config/kamal-backup.local.yml`
+
+The shared file is where you name the accessory if it is not called `backup`. The local file is where you point `restore local` and `drill local` at your laptop database and local file paths.
+
+## 2. Choose a restic repository
 
 Before you boot the accessory, decide where the backups will live. Common choices are:
 
@@ -22,20 +46,11 @@ Before you boot the accessory, decide where the backups will live. Common choice
 
 `kamal-backup` writes to that repository through restic. It does not manage the repository service for you.
 
-## Add the accessory
+## 3. Add the accessory
 
 Add a backup accessory to your Kamal deploy config:
 
 ```yaml
-aliases:
-  backup: accessory exec backup "kamal-backup backup"
-  backup-list: accessory exec backup "kamal-backup list"
-  backup-check: accessory exec backup "kamal-backup check"
-  backup-evidence: accessory exec backup "kamal-backup evidence"
-  backup-version: accessory exec backup "kamal-backup version"
-  backup-schedule: accessory exec backup "kamal-backup schedule"
-  backup-logs: accessory logs backup -f
-
 accessories:
   backup:
     image: ghcr.io/crmne/kamal-backup:latest
@@ -58,56 +73,40 @@ accessories:
       - "chatwithwork_storage:/data/storage:ro"
 ```
 
-Boot it:
+That same accessory config becomes the source of truth for production-side commands, and for local restore or local drill when you pass `-d` or `-c`.
+
+## 4. Boot the accessory
 
 ```sh
 bin/kamal accessory boot backup
 bin/kamal accessory logs backup
 ```
 
-## Run the first backup
+The container default command is `kamal-backup schedule`, so once the accessory is up it starts running the foreground scheduler loop.
 
-The production interface is the accessory container. The image ships the `kamal-backup` executable, so you can run one-off commands through Kamal:
+## 5. Run the first backup
 
-```sh
-bin/kamal backup
-bin/kamal backup-list
-bin/kamal backup-check
-bin/kamal backup-evidence
-bin/kamal backup-version
-bin/kamal backup-schedule
-bin/kamal backup-logs
-```
-
-After the first run, inspect the snapshots and evidence:
+From your app checkout, use the gem and let it shell out through Kamal:
 
 ```sh
-bin/kamal backup-list
-bin/kamal backup-evidence
+bundle exec kamal-backup -d production backup
+bundle exec kamal-backup -d production list
+bundle exec kamal-backup -d production evidence
 ```
 
-Recommended aliases:
+If you keep multiple deploy configs, pass `-c` the same way Kamal does:
 
-| Alias | Expands to | Use |
-|---|---|---|
-| `bin/kamal backup` | `accessory exec backup "kamal-backup backup"` | Run one backup immediately. |
-| `bin/kamal backup-list` | `accessory exec backup "kamal-backup list"` | Show restic snapshots for the configured app. |
-| `bin/kamal backup-check` | `accessory exec backup "kamal-backup check"` | Run `restic check` and store the latest check result. |
-| `bin/kamal backup-evidence` | `accessory exec backup "kamal-backup evidence"` | Print redacted backup evidence JSON. |
-| `bin/kamal backup-version` | `accessory exec backup "kamal-backup version"` | Print the running `kamal-backup` version. |
-| `bin/kamal backup-schedule` | `accessory exec backup "kamal-backup schedule"` | Run the foreground scheduler loop manually. Mostly useful for debugging. |
-| `bin/kamal backup-logs` | `accessory logs backup -f` | Tail the backup accessory logs. |
-
-Once you have a scratch restore target configured, add a drill alias too:
-
-```yaml
-aliases:
-  backup-drill: accessory exec backup "kamal-backup drill production latest --database app_restore_20260423 --files /restore/files --check 'test -d /restore/files/data/storage' --yes"
+```sh
+bundle exec kamal-backup -c config/deploy.staging.yml -d staging backup
 ```
 
-Only add that after you have picked a real scratch database name or SQLite path and a scratch file path for drills.
+The same pattern works for the other production-side commands:
 
-Deliberate restore commands are intentionally not aliased in the default block. Use `bin/kamal accessory exec backup "kamal-backup ..."` directly when you need `restore production`, and run `restore local` from your own machine.
+```sh
+bundle exec kamal-backup -d production check
+bundle exec kamal-backup -d production version
+bundle exec kamal-backup -d production schedule
+```
 
 ## What the first backup creates
 

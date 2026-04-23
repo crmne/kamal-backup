@@ -1,13 +1,22 @@
 require_relative "test_helper"
 
 class CLITest < Minitest::Test
-  def with_fake_app(fake)
-    original_new = KamalBackup::App.method(:new)
+  def stub_constructor(klass, fake = nil, replacement: nil)
+    original_new = klass.method(:new)
+    handler = replacement || proc { |*_, **| fake }
 
-    KamalBackup::App.define_singleton_method(:new) { |**| fake }
+    klass.define_singleton_method(:new, &handler)
     yield
   ensure
-    KamalBackup::App.define_singleton_method(:new) { |**kwargs| original_new.call(**kwargs) }
+    klass.define_singleton_method(:new) { |*args, **kwargs, &block| original_new.call(*args, **kwargs, &block) }
+  end
+
+  def with_fake_app(fake, &block)
+    stub_constructor(KamalBackup::App, fake, &block)
+  end
+
+  def with_fake_bridge(fake)
+    stub_constructor(KamalBackup::KamalBridge, fake, replacement: proc { |*_, **| fake }) { yield }
   end
 
   def test_start_redacts_error_messages
@@ -39,6 +48,7 @@ class CLITest < Minitest::Test
     out, = capture_io { KamalBackup::CLI.start([], env: base_env) }
 
     assert_includes out, "kamal-backup help [COMMAND]"
+    assert_includes out, "kamal-backup init"
     assert_includes out, "kamal-backup backup"
     assert_includes out, "kamal-backup restore SUBCOMMAND ...ARGS"
     assert_includes out, "kamal-backup drill SUBCOMMAND ...ARGS"
@@ -149,5 +159,124 @@ class CLITest < Minitest::Test
     end
 
     assert_includes err, "confirmation required"
+  end
+
+  def test_init_creates_local_config_stubs
+    Dir.mktmpdir do |dir|
+      out, _ = Dir.chdir(dir) do
+        capture_io { KamalBackup::CLI.start(["init"], env: {}) }
+      end
+
+      assert File.file?(File.join(dir, "config", "kamal-backup.yml"))
+      assert File.file?(File.join(dir, "config", "kamal-backup.local.yml"))
+      assert_includes File.read(File.join(dir, "config", "kamal-backup.yml")), "accessory: backup"
+      assert_includes File.read(File.join(dir, "config", "kamal-backup.local.yml")), "state_dir: tmp/kamal-backup"
+      assert_includes out, "Add this accessory block to your Kamal deploy config:"
+      refute_includes out, "aliases:"
+    end
+  end
+
+  def test_backup_with_destination_runs_through_kamal
+    fake_bridge = Object.new
+    calls = []
+    preferred_values = []
+
+    fake_bridge.define_singleton_method(:accessory_name) do |preferred:|
+      preferred_values << preferred
+      "backup"
+    end
+
+    fake_bridge.define_singleton_method(:execute_on_accessory) do |accessory_name:, command:|
+      calls << { accessory_name: accessory_name, command: command }
+      KamalBackup::CommandResult.new(stdout: "remote backup\n", stderr: "", status: 0)
+    end
+
+    out, _ = capture_io do
+      with_fake_bridge(fake_bridge) do
+        KamalBackup::CLI.start(["-d", "production", "backup"], env: {})
+      end
+    end
+
+    assert_equal [nil], preferred_values
+    assert_equal [{ accessory_name: "backup", command: "kamal-backup backup" }], calls
+    assert_equal "remote backup\n", out
+  end
+
+  def test_restore_local_with_destination_uses_remote_defaults_and_local_targets
+    fake_bridge = Object.new
+    received = {}
+
+    fake_bridge.define_singleton_method(:accessory_name) { |preferred:| "backup" }
+    fake_bridge.define_singleton_method(:local_restore_defaults) do |accessory_name:|
+      {
+        "APP_NAME" => "chatwithwork",
+        "DATABASE_ADAPTER" => "postgres",
+        "RESTIC_REPOSITORY" => "s3:https://s3.example.com/chatwithwork-backups",
+        "LOCAL_RESTORE_SOURCE_PATHS" => "/data/storage"
+      }
+    end
+
+    fake_app = Object.new
+    fake_app.define_singleton_method(:restore_to_local_machine) do |_snapshot|
+      { status: "ok" }
+    end
+
+    Dir.mktmpdir do |dir|
+      config_dir = File.join(dir, "config")
+      FileUtils.mkdir_p(config_dir)
+      File.write(
+        File.join(config_dir, "kamal-backup.local.yml"),
+        <<~YAML
+          database_url: postgres://localhost/chatwithwork_development
+          backup_paths:
+            - storage
+        YAML
+      )
+
+      out, _ = Dir.chdir(dir) do
+        capture_io do
+          with_fake_bridge(fake_bridge) do
+            stub_constructor(
+              KamalBackup::App,
+              replacement: proc do |*_, config:, **|
+                received[:config] = config
+                fake_app
+              end
+            ) do
+              KamalBackup::CLI.start(["-d", "production", "restore", "local", "latest", "--yes"], env: { "RESTIC_PASSWORD" => "secret" })
+            end
+          end
+        end
+      end
+
+      config = received.fetch(:config)
+
+      assert_equal "chatwithwork", config.app_name
+      assert_equal "postgres", config.database_adapter
+      assert_equal "s3:https://s3.example.com/chatwithwork-backups", config.restic_repository
+      assert_equal ["/data/storage"], config.local_restore_source_paths
+      assert_equal ["storage"], config.backup_paths
+      assert_includes out, "\"status\": \"ok\""
+    end
+  end
+
+  def test_version_with_destination_runs_through_kamal
+    fake_bridge = Object.new
+    calls = []
+
+    fake_bridge.define_singleton_method(:accessory_name) { |preferred:| "backup" }
+    fake_bridge.define_singleton_method(:execute_on_accessory) do |accessory_name:, command:|
+      calls << { accessory_name: accessory_name, command: command }
+      KamalBackup::CommandResult.new(stdout: "#{KamalBackup::VERSION}\n", stderr: "", status: 0)
+    end
+
+    out, _ = capture_io do
+      with_fake_bridge(fake_bridge) do
+        KamalBackup::CLI.start(["-d", "production", "version"], env: {})
+      end
+    end
+
+    assert_equal [{ accessory_name: "backup", command: "kamal-backup version" }], calls
+    assert_equal "#{KamalBackup::VERSION}\n", out
   end
 end

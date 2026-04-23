@@ -26,13 +26,6 @@ module KamalBackup
         CommandSpec.new(argv: argv, env: password_env(connection))
       end
 
-      def restore_command
-        connection = restore_connection
-        argv = [client_binary] + connection_args(connection)
-        argv << connection.fetch(:database)
-        CommandSpec.new(argv: argv, env: password_env(connection))
-      end
-
       def current_restore_command
         connection = current_connection
         argv = [client_binary] + connection_args(connection)
@@ -45,11 +38,6 @@ module KamalBackup
         argv = [client_binary] + connection_args(connection)
         argv << target
         CommandSpec.new(argv: argv, env: password_env(connection))
-      end
-
-      def restore_target_identifier
-        connection = restore_connection
-        [connection[:host], connection[:database]].compact.join("/")
       end
 
       def current_target_identifier
@@ -83,14 +71,6 @@ module KamalBackup
             parse_url(value("DATABASE_URL"))
           else
             connection_from_env("")
-          end
-        end
-
-        def restore_connection
-          if value("RESTORE_DATABASE_URL")
-            parse_url(value("RESTORE_DATABASE_URL"))
-          else
-            connection_from_env("RESTORE_")
           end
         end
 

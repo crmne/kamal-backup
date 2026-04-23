@@ -1,4 +1,5 @@
 require "uri"
+require "yaml"
 require_relative "errors"
 
 module KamalBackup
@@ -12,11 +13,40 @@ module KamalBackup
     }.freeze
 
     SUSPICIOUS_BACKUP_PATHS = %w[/ /var /etc /root /usr /bin /sbin /boot /dev /proc /sys /run].freeze
+    DEFAULT_CONFIG_PATHS = %w[config/kamal-backup.yml config/kamal-backup.local.yml].freeze
+    YAML_KEY_ALIASES = {
+      "app_name" => "APP_NAME",
+      "database_adapter" => "DATABASE_ADAPTER",
+      "database_url" => "DATABASE_URL",
+      "sqlite_database_path" => "SQLITE_DATABASE_PATH",
+      "backup_paths" => "BACKUP_PATHS",
+      "local_restore_source_paths" => "LOCAL_RESTORE_SOURCE_PATHS",
+      "accessory" => "KAMAL_BACKUP_ACCESSORY",
+      "restic_repository" => "RESTIC_REPOSITORY",
+      "restic_password" => "RESTIC_PASSWORD",
+      "restic_init_if_missing" => "RESTIC_INIT_IF_MISSING",
+      "restic_check_after_backup" => "RESTIC_CHECK_AFTER_BACKUP",
+      "restic_check_read_data_subset" => "RESTIC_CHECK_READ_DATA_SUBSET",
+      "restic_forget_after_backup" => "RESTIC_FORGET_AFTER_BACKUP",
+      "restic_keep_last" => "RESTIC_KEEP_LAST",
+      "restic_keep_daily" => "RESTIC_KEEP_DAILY",
+      "restic_keep_weekly" => "RESTIC_KEEP_WEEKLY",
+      "restic_keep_monthly" => "RESTIC_KEEP_MONTHLY",
+      "restic_keep_yearly" => "RESTIC_KEEP_YEARLY",
+      "backup_schedule_seconds" => "BACKUP_SCHEDULE_SECONDS",
+      "backup_start_delay_seconds" => "BACKUP_START_DELAY_SECONDS",
+      "state_dir" => "KAMAL_BACKUP_STATE_DIR",
+      "allow_production_restore" => "KAMAL_BACKUP_ALLOW_PRODUCTION_RESTORE",
+      "allow_suspicious_paths" => "KAMAL_BACKUP_ALLOW_SUSPICIOUS_PATHS",
+      "pgpassword" => "PGPASSWORD",
+      "mysql_pwd" => "MYSQL_PWD"
+    }.freeze
 
     attr_reader :env
 
-    def initialize(env: ENV)
-      @env = env.to_h
+    def initialize(env: ENV, cwd: Dir.pwd, defaults: {})
+      raw_env = env.to_h
+      @env = defaults.to_h.merge(load_config_files(raw_env, cwd: cwd)).merge(raw_env)
     end
 
     def app_name
@@ -25,6 +55,10 @@ module KamalBackup
 
     def required_app_name
       required_value("APP_NAME")
+    end
+
+    def accessory_name
+      value("KAMAL_BACKUP_ACCESSORY")
     end
 
     def restic_repository
@@ -249,6 +283,54 @@ module KamalBackup
     end
 
     private
+      def load_config_files(raw_env, cwd:)
+        config_paths(raw_env, cwd: cwd).each_with_object({}) do |path, merged|
+          next unless File.file?(path)
+
+          merged.merge!(normalize_config_file(path))
+        end
+      end
+
+      def config_paths(raw_env, cwd:)
+        if explicit = raw_env["KAMAL_BACKUP_CONFIG"]
+          [File.expand_path(explicit, cwd)]
+        else
+          DEFAULT_CONFIG_PATHS.map { |relative| File.expand_path(relative, cwd) }
+        end
+      end
+
+      def normalize_config_file(path)
+        data = YAML.safe_load(File.read(path), permitted_classes: [], aliases: false)
+        return {} if data.nil?
+
+        unless data.is_a?(Hash)
+          raise ConfigurationError, "#{path} must contain a YAML mapping"
+        end
+
+        data.each_with_object({}) do |(raw_key, raw_value), result|
+          key = normalize_yaml_key(raw_key)
+          result[key] = normalize_yaml_value(raw_value)
+        end
+      rescue Psych::SyntaxError => e
+        raise ConfigurationError, "invalid YAML in #{path}: #{e.message}"
+      end
+
+      def normalize_yaml_key(raw_key)
+        key = raw_key.to_s
+        YAML_KEY_ALIASES[key] || key.upcase
+      end
+
+      def normalize_yaml_value(raw_value)
+        case raw_value
+        when Array
+          raw_value.map(&:to_s).join("\n")
+        when NilClass
+          nil
+        else
+          raw_value.to_s
+        end
+      end
+
       def validate_local_machine_environment
         if environment = local_restore_environment
           key, value = environment
