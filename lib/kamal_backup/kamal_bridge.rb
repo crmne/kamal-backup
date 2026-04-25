@@ -46,6 +46,17 @@ module KamalBackup
       capture_kamal(kamal_exec_argv(accessory_name, command))
     end
 
+    def remote_version(accessory_name:)
+      result = execute_on_accessory(accessory_name: accessory_name, command: "kamal-backup version")
+      version = result.stdout.to_s.strip
+
+      if version.empty?
+        raise ConfigurationError, "could not determine remote kamal-backup version from accessory #{accessory_name}"
+      else
+        version
+      end
+    end
+
     private
       def config
         @config ||= begin

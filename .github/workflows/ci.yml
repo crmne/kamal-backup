@@ -29,7 +29,14 @@ jobs:
 
       - id: version
         name: Read kamal-backup version
-        run: echo "version=$(ruby -r ./lib/kamal_backup/version -e 'puts KamalBackup::VERSION')" >> "$GITHUB_OUTPUT"
+        run: |
+          VERSION=$(ruby -r ./lib/kamal_backup/version -e 'puts KamalBackup::VERSION')
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          if ruby -rrubygems/version -e 'exit Gem::Version.new(ARGV.fetch(0)).prerelease? ? 0 : 1' "$VERSION"; then
+            echo "stable=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "stable=true" >> "$GITHUB_OUTPUT"
+          fi
 
       - uses: docker/setup-buildx-action@v3
 
@@ -49,7 +56,7 @@ jobs:
             type=ref,event=tag
             type=sha,prefix=sha-
             type=raw,value=${{ steps.version.outputs.version }},enable={{is_default_branch}}
-            type=raw,value=latest,enable={{is_default_branch}}
+            type=raw,value=latest,enable=${{ github.ref == format('refs/heads/{0}', github.event.repository.default_branch) && steps.version.outputs.stable == 'true' }}
           labels: |
             org.opencontainers.image.version=${{ steps.version.outputs.version }}
 

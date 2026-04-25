@@ -87,6 +87,12 @@ bin/kamal accessory logs backup
 
 The container default command is `kamal-backup schedule`, so once the accessory is up it starts running the foreground scheduler loop.
 
+When you update the local gem, production-side commands expect the accessory to be on the same `kamal-backup` version. If they drift, reboot the accessory so it pulls the current `latest` image:
+
+```sh
+bin/kamal accessory reboot backup
+```
+
 ## 5. Run the first backup
 
 From your app checkout, use the gem and let it shell out through Kamal:

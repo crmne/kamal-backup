@@ -1,7 +1,7 @@
 PATH
   remote: .
   specs:
-    kamal-backup (0.1.0)
+    kamal-backup (0.1.1)
       thor (~> 1.5)
 
 GEM
@@ -24,7 +24,7 @@ DEPENDENCIES
 
 CHECKSUMS
   drb (2.2.3) sha256=0b00d6fdb50995fe4a45dea13663493c841112e4068656854646f418fda13373
-  kamal-backup (0.1.0)
+  kamal-backup (0.1.1)
   minitest (6.0.5) sha256=f007d7246bf4feea549502842cd7c6aba8851cdc9c90ba06de9c476c0d01155c
   prism (1.9.0) sha256=7b530c6a9f92c24300014919c9dcbc055bf4cdf51ec30aed099b06cd6674ef85
   thor (1.5.0) sha256=e3a9e55fe857e44859ce104a84675ab6e8cd59c650a49106a05f55f136425e73

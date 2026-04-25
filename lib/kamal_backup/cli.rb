@@ -54,13 +54,45 @@ module KamalBackup
         @accessory_name ||= bridge.accessory_name(preferred: local_preferences.accessory_name)
       end
 
-      def exec_remote(argv)
+      def remote_version
+        @remote_version ||= bridge.remote_version(accessory_name: accessory_name)
+      end
+
+      def exec_remote(argv, require_version_match: true)
+        ensure_remote_version_match! if require_version_match
+
         result = bridge.execute_on_accessory(
           accessory_name: accessory_name,
           command: Shellwords.join(argv)
         )
         print(result.stdout)
         result
+      end
+
+      def ensure_remote_version_match!
+        return if remote_version == VERSION
+
+        raise ConfigurationError, <<~MESSAGE.strip
+          local gem version #{VERSION} does not match remote accessory version #{remote_version}.
+          Reboot the backup accessory to pick up the latest image:
+          #{accessory_reboot_command}
+        MESSAGE
+      end
+
+      def accessory_reboot_command
+        argv = ["bin/kamal", "accessory", "reboot", accessory_name]
+        argv.concat(["-c", options[:config_file]]) if options[:config_file]
+        argv.concat(["-d", options[:destination]]) if options[:destination]
+        Shellwords.join(argv)
+      end
+
+      def print_remote_version_status
+        status = remote_version == VERSION ? "in sync" : "out of sync"
+
+        puts("local: #{VERSION}")
+        puts("remote: #{remote_version}")
+        puts("status: #{status}")
+        puts("fix: #{accessory_reboot_command}") if status == "out of sync"
       end
 
       def confirm!(message)
@@ -345,7 +377,7 @@ module KamalBackup
     desc "version", "Print the running kamal-backup version"
     def version
       if deployment_mode?
-        exec_remote(["kamal-backup", "version"])
+        print_remote_version_status
       else
         puts(VERSION)
       end

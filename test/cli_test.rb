@@ -192,6 +192,11 @@ class CLITest < Minitest::Test
       KamalBackup::CommandResult.new(stdout: "remote backup\n", stderr: "", status: 0)
     end
 
+    fake_bridge.define_singleton_method(:remote_version) do |accessory_name:|
+      calls << { accessory_name: accessory_name, command: "kamal-backup version" }
+      KamalBackup::VERSION
+    end
+
     Dir.mktmpdir do |dir|
       out, _ = Dir.chdir(dir) do
         capture_io do
@@ -202,7 +207,10 @@ class CLITest < Minitest::Test
       end
 
       assert_equal [nil], preferred_values
-      assert_equal [{ accessory_name: "backup", command: "kamal-backup backup" }], calls
+      assert_equal [
+        { accessory_name: "backup", command: "kamal-backup version" },
+        { accessory_name: "backup", command: "kamal-backup backup" }
+      ], calls
       assert_equal "remote backup\n", out
     end
   end
@@ -272,12 +280,12 @@ class CLITest < Minitest::Test
 
   def test_version_with_destination_runs_through_kamal
     fake_bridge = Object.new
-    calls = []
+    requested_accessories = []
 
     fake_bridge.define_singleton_method(:accessory_name) { |preferred:| "backup" }
-    fake_bridge.define_singleton_method(:execute_on_accessory) do |accessory_name:, command:|
-      calls << { accessory_name: accessory_name, command: command }
-      KamalBackup::CommandResult.new(stdout: "#{KamalBackup::VERSION}\n", stderr: "", status: 0)
+    fake_bridge.define_singleton_method(:remote_version) do |accessory_name:|
+      requested_accessories << accessory_name
+      KamalBackup::VERSION
     end
 
     out, _ = capture_io do
@@ -286,7 +294,49 @@ class CLITest < Minitest::Test
       end
     end
 
-    assert_equal [{ accessory_name: "backup", command: "kamal-backup version" }], calls
-    assert_equal "#{KamalBackup::VERSION}\n", out
+    assert_equal ["backup"], requested_accessories
+    assert_includes out, "local: #{KamalBackup::VERSION}"
+    assert_includes out, "remote: #{KamalBackup::VERSION}"
+    assert_includes out, "status: in sync"
+  end
+
+  def test_remote_commands_fail_when_versions_do_not_match
+    fake_bridge = Object.new
+
+    fake_bridge.define_singleton_method(:accessory_name) { |preferred:| "backup" }
+    fake_bridge.define_singleton_method(:remote_version) { |accessory_name:| "0.0.9" }
+    fake_bridge.define_singleton_method(:execute_on_accessory) do |**|
+      raise "should not run"
+    end
+
+    _, err = capture_io do
+      error = assert_raises(SystemExit) do
+        with_fake_bridge(fake_bridge) do
+          KamalBackup::CLI.start(["-d", "production", "list"], env: {})
+        end
+      end
+      assert_equal 1, error.status
+    end
+
+    assert_includes err, "local gem version #{KamalBackup::VERSION} does not match remote accessory version 0.0.9"
+    assert_includes err, "bin/kamal accessory reboot backup -d production"
+  end
+
+  def test_version_with_destination_reports_out_of_sync_without_failing
+    fake_bridge = Object.new
+
+    fake_bridge.define_singleton_method(:accessory_name) { |preferred:| "backup" }
+    fake_bridge.define_singleton_method(:remote_version) { |accessory_name:| "0.0.9" }
+
+    out, _ = capture_io do
+      with_fake_bridge(fake_bridge) do
+        KamalBackup::CLI.start(["-d", "production", "version"], env: {})
+      end
+    end
+
+    assert_includes out, "local: #{KamalBackup::VERSION}"
+    assert_includes out, "remote: 0.0.9"
+    assert_includes out, "status: out of sync"
+    assert_includes out, "fix: bin/kamal accessory reboot backup -d production"
   end
 end
