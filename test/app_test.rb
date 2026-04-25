@@ -358,4 +358,33 @@ class AppTest < Minitest::Test
       assert_equal "failed", persisted.fetch("check").fetch("status")
     end
   end
+
+  def test_restore_to_local_machine_reports_missing_restic_before_running
+    Dir.mktmpdir do |dir|
+      db = File.join(dir, "app_development.sqlite3")
+      files = File.join(dir, "storage")
+      File.write(db, "")
+      FileUtils.mkdir_p(files)
+
+      app = KamalBackup::App.new(
+        env: base_env(
+          "DATABASE_ADAPTER" => "sqlite",
+          "SQLITE_DATABASE_PATH" => db,
+          "BACKUP_PATHS" => files
+        ),
+        database: FakeDatabase.new(adapter_name: "sqlite", current_target_identifier: db)
+      )
+
+      app.define_singleton_method(:require_restic!) do
+        raise KamalBackup::ConfigurationError,
+          "restic is required on PATH for commands that run on this machine. Install restic locally and try again."
+      end
+
+      error = assert_raises(KamalBackup::ConfigurationError) do
+        app.restore_to_local_machine("latest")
+      end
+
+      assert_includes error.message, "restic is required on PATH"
+    end
+  end
 end

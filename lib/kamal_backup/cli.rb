@@ -329,6 +329,7 @@ module KamalBackup
       puts deploy_snippet
       puts
       puts "For most Rails apps, restore local and drill local can infer the development database, storage path, and tmp state directory."
+      puts "Local restore and drill also require the restic binary on your machine."
       puts "Create config/kamal-backup.local.yml only if you need to override those local defaults."
     end
 

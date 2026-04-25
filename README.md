@@ -59,6 +59,8 @@ For most Rails apps, that is enough. `restore local` and `drill local` can infer
 
 Only create `config/kamal-backup.local.yml` if you need to override those local defaults.
 
+Local restore and drill also require the `restic` binary on your machine. The backup accessory image already includes `restic` for production-side commands.
+
 Then add the backup accessory to `config/deploy.yml`:
 
 ```yaml
@@ -193,6 +195,8 @@ You still provide the local secrets yourself in env:
 - `POSTGRES_PASSWORD` or `MYSQL_PWD` when needed
 - `RESTIC_REPOSITORY` when it is not visible through `kamal config`
 
+And you need `restic` installed locally and available on `PATH`.
+
 Example:
 
 ```sh
@@ -216,6 +220,8 @@ It prompts locally, then shells out through Kamal to the backup accessory.
 ```sh
 bundle exec kamal-backup -d production drill local latest --check "bin/rails runner 'puts User.count'"
 ```
+
+Like `restore local`, this runs on your machine and requires a local `restic` install.
 
 `drill production` restores into scratch targets on production infrastructure. It does not touch the live production database:
 

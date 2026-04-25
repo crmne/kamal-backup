@@ -21,6 +21,8 @@ For a small Rails app, this is often the fastest proof that the backup is real:
 bundle exec kamal-backup -d production drill local latest --check "bin/rails runner 'puts User.count'"
 ```
 
+This runs on your machine, so it also requires a local `restic` install on `PATH`.
+
 With `-d` or `-c`, `drill local` uses the production accessory config for the source side:
 
 - `APP_NAME`

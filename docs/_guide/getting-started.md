@@ -37,6 +37,8 @@ The shared file is where you name the accessory if it is not called `backup`.
 
 For most Rails apps, `restore local` and `drill local` can infer the local development database, the `storage` path, and `tmp/kamal-backup` without a second file. Only create `config/kamal-backup.local.yml` when your local targets are nonstandard.
 
+If you want to run `restore local` or `drill local`, install `restic` on your machine too. The backup accessory image already includes it for production-side commands.
+
 ## 2. Choose a restic repository
 
 Before you boot the accessory, decide where the backups will live. Common choices are:

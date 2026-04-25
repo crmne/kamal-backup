@@ -88,10 +88,7 @@ module KamalBackup
         end
 
         def executable_available?(name)
-          ENV.fetch("PATH", "").split(File::PATH_SEPARATOR).any? do |dir|
-            path = File.join(dir, name)
-            File.executable?(path) && !File.directory?(path)
-          end
+          Command.available?(name)
         end
     end
   end

@@ -36,6 +36,8 @@ You still provide the local secrets yourself in env:
 - `POSTGRES_PASSWORD` or `MYSQL_PWD` when needed
 - `RESTIC_REPOSITORY` when it is not visible through `kamal config`
 
+And you need the `restic` binary installed locally and available on `PATH`.
+
 Example:
 
 ```sh

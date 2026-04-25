@@ -171,6 +171,7 @@ class CLITest < Minitest::Test
       assert_includes File.read(File.join(dir, "config", "kamal-backup.yml")), "accessory: backup"
       refute File.exist?(File.join(dir, "config", "kamal-backup.local.yml"))
       assert_includes out, "Add this accessory block to your Kamal deploy config:"
+      assert_includes out, "Local restore and drill also require the restic binary on your machine."
       assert_includes out, "Create config/kamal-backup.local.yml only if you need to override those local defaults."
       refute_includes out, "aliases:"
     end
@@ -191,15 +192,19 @@ class CLITest < Minitest::Test
       KamalBackup::CommandResult.new(stdout: "remote backup\n", stderr: "", status: 0)
     end
 
-    out, _ = capture_io do
-      with_fake_bridge(fake_bridge) do
-        KamalBackup::CLI.start(["-d", "production", "backup"], env: {})
+    Dir.mktmpdir do |dir|
+      out, _ = Dir.chdir(dir) do
+        capture_io do
+          with_fake_bridge(fake_bridge) do
+            KamalBackup::CLI.start(["-d", "production", "backup"], env: {})
+          end
+        end
       end
-    end
 
-    assert_equal [nil], preferred_values
-    assert_equal [{ accessory_name: "backup", command: "kamal-backup backup" }], calls
-    assert_equal "remote backup\n", out
+      assert_equal [nil], preferred_values
+      assert_equal [{ accessory_name: "backup", command: "kamal-backup backup" }], calls
+      assert_equal "remote backup\n", out
+    end
   end
 
   def test_restore_local_with_destination_uses_remote_defaults_and_local_targets

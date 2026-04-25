@@ -29,6 +29,7 @@ module KamalBackup
 
     def backup
       config.validate_backup
+      require_restic!
 
       timestamp = current_timestamp
       restic.ensure_repository
@@ -48,6 +49,7 @@ module KamalBackup
 
     def restore_to_local_machine(snapshot = "latest")
       validate_local_machine_restore
+      require_restic!
 
       build_restore_result("local", snapshot) do |result|
         adapter = database
@@ -63,6 +65,7 @@ module KamalBackup
 
     def restore_to_production(snapshot = "latest")
       validate_production_restore
+      require_restic!
 
       build_restore_result("production", snapshot) do |result|
         adapter = database
@@ -77,6 +80,7 @@ module KamalBackup
 
     def drill_on_local_machine(snapshot = "latest", check_command: nil)
       validate_local_machine_restore
+      require_restic!
 
       run_drill("local", snapshot, check_command: check_command) do |result|
         adapter = database
@@ -92,6 +96,7 @@ module KamalBackup
 
     def drill_on_production(snapshot = "latest", database_name: nil, sqlite_path: nil, file_target: "/restore/files", check_command: nil)
       validate_production_drill(file_target, database_name, sqlite_path)
+      require_restic!
 
       run_drill("production", snapshot, check_command: check_command) do |result|
         adapter = database
@@ -113,16 +118,19 @@ module KamalBackup
 
     def snapshots
       config.validate_restic
+      require_restic!
       restic.snapshots.stdout
     end
 
     def check
       config.validate_restic
+      require_restic!
       restic.check.stdout
     end
 
     def evidence
       config.validate_restic
+      require_restic!
       @evidence_class.new(config, restic: restic, redactor: redactor).to_json
     end
 
@@ -312,6 +320,14 @@ module KamalBackup
         config.validate_local_database_restore_target(adapter.current_target_identifier)
       end
 
+      def require_restic!
+        return unless using_builtin_restic?
+        return if Command.available?("restic")
+
+        raise ConfigurationError,
+          "restic is required on PATH for commands that run on this machine. Install restic locally and try again."
+      end
+
       def run_drill_check(command)
         result = Command.capture(
           CommandSpec.new(argv: ["sh", "-lc", command]),
@@ -345,6 +361,10 @@ module KamalBackup
 
       def restic
         @restic ||= Restic.new(config, redactor: redactor)
+      end
+
+      def using_builtin_restic?
+        @restic.nil? || @restic.is_a?(Restic)
       end
 
       def database

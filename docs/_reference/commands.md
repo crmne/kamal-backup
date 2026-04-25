@@ -56,6 +56,7 @@ Use `kamal-backup help`, `kamal-backup help restore`, or `kamal-backup help dril
 ## Notes
 
 - `local` always means your machine, not "whatever environment the command is running in."
+- `restore local` and `drill local` require `restic` on your machine.
 - `production` means the production-side accessory context.
 - `drill production` restores into scratch targets on production infrastructure. It does not touch the live production database.
 - Destructive restore commands prompt by default. Add `--yes` for automation.

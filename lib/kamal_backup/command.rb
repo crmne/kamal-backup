@@ -26,6 +26,13 @@ module KamalBackup
 
   class Command
     class << self
+      def available?(name)
+        ENV.fetch("PATH", "").split(File::PATH_SEPARATOR).any? do |dir|
+          path = File.join(dir, name)
+          File.executable?(path) && !File.directory?(path)
+        end
+      end
+
       def capture(spec, input: nil, redactor:)
         stdout, stderr, status = Open3.capture3(spec.env, *spec.argv, stdin_data: input)
         result = CommandResult.new(stdout: stdout, stderr: stderr, status: status.exitstatus)
