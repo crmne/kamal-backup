@@ -1,28 +1,42 @@
-# kamal-backup
+<div align="center">
 
-The easiest way to run scheduled backups for a Rails app deployed with Kamal.
+<img src="docs/assets/images/logo.svg" alt="kamal-backup" height="96">
+
+<h1>kamal-backup</h1>
+
+<strong>The easiest way to run scheduled backups for a Rails app deployed with Kamal.</strong>
+
+<br>
+<br>
+
+[![Gem Version](https://img.shields.io/gem/v/kamal-backup.svg)](https://rubygems.org/gems/kamal-backup)
+[![CI](https://github.com/crmne/kamal-backup/actions/workflows/ci.yml/badge.svg)](https://github.com/crmne/kamal-backup/actions/workflows/ci.yml)
+[![Docker Image](https://img.shields.io/badge/image-ghcr.io%2Fcrmne%2Fkamal--backup-blue)](https://github.com/crmne/kamal-backup/pkgs/container/kamal-backup)
+[![Docs](https://img.shields.io/badge/docs-kamal--backup.dev-blue)](https://kamal-backup.dev)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+
+</div>
+
+---
 
 `kamal-backup` is a Kamal accessory that backs up your Rails database and file-backed Active Storage files on a schedule, stores them in an encrypted restic repository, and gives you restore drills plus evidence you can hand to a security reviewer.
 
 If you already deploy with Kamal, backups should feel like adding one more accessory, not designing a new operations system.
 
-It backs up:
+| 🕒 Scheduled | 🗄️ Rails data | 🔁 Restore proof | 📋 Review evidence |
+|---|---|---|---|
+| Runs as a Kamal accessory with `BACKUP_SCHEDULE_SECONDS`. | Backs up PostgreSQL, MySQL/MariaDB, SQLite, and file-backed Active Storage files. | Restores locally or into scratch production-side targets for drills. | Emits redacted JSON for security reviews like CASA. |
 
-- PostgreSQL, MySQL/MariaDB, or SQLite databases
-- file-backed Active Storage files on mounted volumes
-
-It runs:
-
-- `schedule`: the normal accessory loop, controlled by `BACKUP_SCHEDULE_SECONDS`
-- `backup`: one immediate backup when you want to test or run manually
-- `check`: a restic repository health check
-
-It proves the backups work:
-
-- `restore local`: pull a production backup onto your machine
-- `restore production`: restore back into live production
-- `drill local`: prove the backup works on your machine
-- `drill production`: restore into scratch targets on production infrastructure, run checks, and record evidence
+```mermaid
+flowchart LR
+  A[Kamal accessory] -->|schedule| B[Database dump]
+  A -->|schedule| C[Active Storage files]
+  B --> D[Encrypted restic repository]
+  C --> D
+  D --> E[Restore local]
+  D --> F[Restore drill]
+  F --> G[Evidence JSON]
+```
 
 That last part matters. Security reviews, customer questionnaires, and real incident prep need more than "we have backups." `kamal-backup evidence` produces a redacted JSON record with the latest snapshots, repository checks, restore drill result, retention settings, and tool versions.
 
