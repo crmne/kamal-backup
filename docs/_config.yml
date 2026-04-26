@@ -52,11 +52,19 @@ jekyll_vitepress:
       "--vp-c-brand-2": "#3b82f6"
       "--vp-c-brand-3": "#1d4ed8"
       "--vp-c-brand-soft": rgba(37, 99, 235, 0.14)
+      "--vp-home-hero-name-color": transparent
+      "--vp-home-hero-name-background": "-webkit-linear-gradient(120deg, #0a82f5 20%, #5db43e 84%)"
+      "--vp-home-hero-image-background-image": "radial-gradient(circle at 34% 32%, rgba(10, 130, 245, 0.58), transparent 36%), radial-gradient(circle at 68% 64%, rgba(93, 180, 62, 0.50), transparent 38%)"
+      "--vp-home-hero-image-filter": blur(60px)
     dark:
       "--vp-c-brand-1": "#60a5fa"
       "--vp-c-brand-2": "#93c5fd"
       "--vp-c-brand-3": "#3b82f6"
       "--vp-c-brand-soft": rgba(96, 165, 250, 0.16)
+      "--vp-home-hero-name-color": transparent
+      "--vp-home-hero-name-background": "-webkit-linear-gradient(120deg, #60a5fa 18%, #86efac 84%)"
+      "--vp-home-hero-image-background-image": "radial-gradient(circle at 34% 32%, rgba(96, 165, 250, 0.44), transparent 38%), radial-gradient(circle at 68% 64%, rgba(93, 180, 62, 0.38), transparent 40%)"
+      "--vp-home-hero-image-filter": blur(64px)
   footer:
     enabled: true
     show_on_docs: false
