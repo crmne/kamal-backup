@@ -15,6 +15,8 @@ Do not put cloud credentials in clear Kamal environment. Use Kamal secrets for:
 - `AWS_SECRET_ACCESS_KEY`;
 - database passwords such as `PGPASSWORD` and `MYSQL_PWD`.
 
+Store a copy of `RESTIC_PASSWORD` outside the app repository and outside the S3 bucket. Restic repositories are encrypted with that password; without it, the backup data is not recoverable.
+
 ## Subprocess execution
 
 External tools are executed with argument arrays, not shell interpolation. The backup container does not need application source code.

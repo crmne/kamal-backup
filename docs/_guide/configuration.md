@@ -54,9 +54,11 @@ For SQLite, point at the database file inside the accessory:
 
 ```yaml
 database_adapter: sqlite
-sqlite_database_path: /data/db/production.sqlite3
+sqlite_database_path: /data/storage/production.sqlite3
 ```
 {: data-title="config/kamal-backup.yml"}
+
+That path should be the live SQLite database file as mounted into the backup accessory. The SQLite adapter creates its own temporary backup file before sending it to restic, and handles the normal Rails WAL cases for read-only storage mounts.
 
 ## Add The Accessory
 
@@ -155,5 +157,7 @@ restic_keep_yearly: 2
 backup_start_delay_seconds: 0
 ```
 {: data-title="config/kamal-backup.yml"}
+
+`restic_forget_after_backup` defaults to enabled unless explicitly set to a falsey value such as `false`, `0`, `no`, `n`, or `off`.
 
 Environment variables can still override YAML values when you need an emergency override, but the clean setup is YAML for configuration and Kamal secrets for secrets.

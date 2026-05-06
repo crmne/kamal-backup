@@ -30,7 +30,7 @@ Most self-hosted Rails apps need the same things:
 - file-backed Active Storage backups from mounted volumes
 - a fast way to restore production data locally
 - restore drills that do not touch the live production database
-- evidence that says more than "the backup job is green"
+- evidence that says more than "the backup ran"
 
 `kamal-backup` packages that workflow into a small Ruby gem, a production accessory image, and a restic repository.
 

@@ -5,6 +5,20 @@ class DatabaseAdaptersTest < Minitest::Test
     KamalBackup::Redactor.new(env: {})
   end
 
+  def stub_command_capture(result)
+    original = KamalBackup::Command.method(:capture)
+    specs = []
+
+    KamalBackup::Command.define_singleton_method(:capture) do |spec, **_kwargs|
+      specs << spec
+      result.respond_to?(:call) ? result.call(spec) : result
+    end
+
+    yield(specs)
+  ensure
+    KamalBackup::Command.define_singleton_method(:capture) { |*args, **kwargs, &block| original.call(*args, **kwargs, &block) }
+  end
+
   def test_postgres_dump_command_uses_custom_format
     config = KamalBackup::Config.new(env: base_env(
       "DATABASE_ADAPTER" => "postgres",
@@ -169,5 +183,62 @@ class DatabaseAdaptersTest < Minitest::Test
     adapter = KamalBackup::Databases::Sqlite.new(config, redactor: redactor)
 
     assert_equal "'/tmp/kamal''backup.sqlite3'", adapter.send(:sqlite_literal, "/tmp/kamal'backup.sqlite3")
+  end
+
+  def test_sqlite_backup_retries_immutable_uri_when_readonly_wal_sidecars_are_absent
+    Dir.mktmpdir do |dir|
+      source = File.join(dir, "app db.sqlite3")
+      target = File.join(dir, "backup.sqlite3")
+      config = KamalBackup::Config.new(env: base_env(
+        "DATABASE_ADAPTER" => "sqlite",
+        "SQLITE_DATABASE_PATH" => source
+      ))
+      adapter = KamalBackup::Databases::Sqlite.new(config, redactor: redactor)
+      attempts = 0
+
+      stub_command_capture(proc do |spec|
+        attempts += 1
+        if attempts == 1
+          raise KamalBackup::CommandError.new(
+            "command failed (1): sqlite3\nError: attempt to write a readonly database",
+            command: spec,
+            status: 1,
+            stderr: "Error: attempt to write a readonly database"
+          )
+        else
+          KamalBackup::CommandResult.new(stdout: "", stderr: "", status: 0)
+        end
+      end) do |specs|
+        adapter.send(:backup_to_file, source, target)
+
+        assert_equal 2, specs.size
+        assert_equal source, specs.first.argv[1]
+        assert_equal "file:#{dir}/app%20db.sqlite3?immutable=1", specs.last.argv[1]
+      end
+    end
+  end
+
+  def test_sqlite_backup_does_not_retry_immutable_uri_when_wal_file_exists
+    Dir.mktmpdir do |dir|
+      source = File.join(dir, "app.sqlite3")
+      target = File.join(dir, "backup.sqlite3")
+      FileUtils.touch("#{source}-wal")
+      config = KamalBackup::Config.new(env: base_env(
+        "DATABASE_ADAPTER" => "sqlite",
+        "SQLITE_DATABASE_PATH" => source
+      ))
+      adapter = KamalBackup::Databases::Sqlite.new(config, redactor: redactor)
+      error = KamalBackup::CommandError.new(
+        "command failed (1): sqlite3\nError: attempt to write a readonly database",
+        command: KamalBackup::CommandSpec.new(argv: ["sqlite3", source, ".backup #{target}"]),
+        status: 1,
+        stderr: "Error: attempt to write a readonly database"
+      )
+
+      stub_command_capture(proc { |_spec| raise error }) do |specs|
+        assert_raises(KamalBackup::CommandError) { adapter.send(:backup_to_file, source, target) }
+        assert_equal 1, specs.size
+      end
+    end
   end
 end
