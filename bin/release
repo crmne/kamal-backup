@@ -149,7 +149,7 @@ run("git", "tag", "-a", tag, "-m", "Release #{tag}")
 
 if push
   run("git", "push", "origin", "master", tag)
-  puts "Release #{tag} pushed. CI will publish the gem, Docker images, GitHub release, and docs."
+  puts "Release #{tag} pushed. CI will publish the gem, Docker images, GitHub release, and docs from the release commit."
 else
   puts "Release #{tag} prepared locally. Push with: git push origin master #{tag}"
 end
