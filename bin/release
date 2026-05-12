@@ -1,0 +1,137 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+require "open3"
+require "rubygems/version"
+require "shellwords"
+
+ROOT = File.expand_path("..", __dir__)
+VERSION_FILE = File.join(ROOT, "lib/kamal_backup/version.rb")
+DOCS_DIR = File.join(ROOT, "docs")
+
+def abort_with(message)
+  warn(message)
+  exit(1)
+end
+
+def run(*argv, chdir: ROOT)
+  puts "+ #{argv.shelljoin}"
+  system(*argv, chdir: chdir) || abort_with("Command failed: #{argv.shelljoin}")
+end
+
+def capture(*argv, chdir: ROOT)
+  stdout, stderr, status = Open3.capture3(*argv, chdir: chdir)
+  abort_with(stderr.empty? ? "Command failed: #{argv.shelljoin}" : stderr) unless status.success?
+
+  stdout
+end
+
+def ensure_clean_worktree!
+  status = capture("git", "status", "--porcelain")
+  return if status.empty?
+
+  abort_with("Working tree is not clean. Commit or stash changes before releasing.")
+end
+
+def ensure_master_branch!
+  branch = capture("git", "branch", "--show-current").strip
+  abort_with("Release must run from master, not #{branch.empty? ? "detached HEAD" : branch}.") unless branch == "master"
+end
+
+def ensure_current_with_origin!
+  run("git", "fetch", "origin", "master", "--tags")
+  current = capture("git", "rev-parse", "HEAD").strip
+  upstream = capture("git", "rev-parse", "origin/master").strip
+  return if current == upstream
+  return if system("git", "merge-base", "--is-ancestor", "origin/master", "HEAD", chdir: ROOT)
+
+  abort_with("Local master does not contain origin/master. Pull or rebase before releasing.")
+end
+
+def ensure_tag_available!(tag)
+  local_tag = system("git", "rev-parse", "--quiet", "--verify", "refs/tags/#{tag}", out: File::NULL, err: File::NULL, chdir: ROOT)
+  abort_with("Local tag #{tag} already exists.") if local_tag
+
+  _, stderr, status = Open3.capture3("git", "ls-remote", "--exit-code", "--tags", "origin", tag, chdir: ROOT)
+  case status.exitstatus
+  when 0
+    abort_with("Remote tag #{tag} already exists.")
+  when 2
+    nil
+  else
+    abort_with(stderr.empty? ? "Could not check remote tag #{tag}." : stderr)
+  end
+end
+
+def ensure_newer_than_latest_tag!(version)
+  latest_tag = capture("git", "tag", "--sort=-v:refname", "--list", "v*").lines.map(&:strip).find do |tag|
+    Gem::Version.correct?(tag.sub(/\Av/i, ""))
+  end
+  return unless latest_tag
+
+  latest_version = Gem::Version.new(latest_tag.sub(/\Av/i, ""))
+  requested_version = Gem::Version.new(version)
+  return if requested_version > latest_version
+
+  abort_with("Version #{version} must be newer than latest tag #{latest_tag}.")
+end
+
+def parse_version(argument)
+  raw = argument.to_s.strip.sub(/\Av/i, "")
+  abort_with("Usage: bin/release VERSION [--no-push]") if raw.empty?
+
+  version = Gem::Version.new(raw)
+  abort_with("Version must contain at least major.minor.patch.") if version.segments.length < 3
+
+  raw
+rescue ArgumentError
+  abort_with("Invalid version: #{argument.inspect}")
+end
+
+def update_version_file!(version)
+  contents = File.read(VERSION_FILE)
+  current = contents[/VERSION\s*=\s*["']([^"']+)["']/, 1]
+  abort_with("Could not find VERSION assignment in #{VERSION_FILE}.") unless current
+  abort_with("#{VERSION_FILE} is already at #{version}.") if current == version
+
+  updated = contents.sub(/VERSION\s*=\s*["'][^"']+["']/, "VERSION = #{version.inspect}")
+
+  File.write(VERSION_FILE, updated)
+end
+
+version_arg, *flags = ARGV
+push = true
+
+flags.each do |flag|
+  case flag
+  when "--no-push"
+    push = false
+  else
+    abort_with("Unknown option: #{flag}")
+  end
+end
+
+version = parse_version(version_arg)
+tag = "v#{version}"
+
+ensure_clean_worktree!
+ensure_master_branch!
+ensure_current_with_origin!
+ensure_tag_available!(tag)
+ensure_newer_than_latest_tag!(version)
+
+update_version_file!(version)
+
+run("git", "diff", "--check")
+run("bin/test")
+run("bundle", "exec", "jekyll", "build", chdir: DOCS_DIR)
+run("git", "add", "lib/kamal_backup/version.rb")
+run("git", "commit", "-m", "Release #{version}")
+run("git", "tag", "-a", tag, "-m", "Release #{tag}")
+
+if push
+  run("git", "push", "origin", "master", tag)
+  puts "Release #{tag} pushed. CI will publish the gem, Docker images, GitHub release, and docs."
+else
+  puts "Release #{tag} prepared locally. Push with: git push origin master #{tag}"
+end

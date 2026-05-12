@@ -124,6 +124,18 @@ Start here:
 - [Restore Drills](https://kamal-backup.dev/restore-drills/)
 - [Commands](https://kamal-backup.dev/commands/)
 
+## Releasing
+
+Run the release helper from a clean `master` checkout:
+
+```sh
+bin/release 0.2.9
+```
+
+It updates `lib/kamal_backup/version.rb`, runs the test suite and docs build, commits `Release 0.2.9`, creates `v0.2.9`, and pushes `master` plus the tag. The tag workflow publishes the RubyGem, Docker image tags, GitHub release, and docs from that exact commit.
+
+Use `bin/release 0.2.9 --no-push` to prepare the commit and tag locally without publishing.
+
 ## License
 
 MIT
