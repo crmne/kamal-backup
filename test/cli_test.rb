@@ -19,6 +19,16 @@ class CLITest < Minitest::Test
     stub_constructor(KamalBackup::KamalBridge, fake, replacement: proc { |*_, **| fake }) { yield }
   end
 
+  def without_stdin
+    previous_stdin = $stdin
+    File.open(File::NULL) do |input|
+      $stdin = input
+      yield
+    end
+  ensure
+    $stdin = previous_stdin
+  end
+
   def test_start_redacts_error_messages
     fake = Object.new
     def fake.backup
@@ -206,12 +216,14 @@ class CLITest < Minitest::Test
     end
 
     _, err = capture_io do
-      error = assert_raises(SystemExit) do
-        with_fake_app(fake) do
-          KamalBackup::CLI.start(["restore", "local"], env: base_env)
+      without_stdin do
+        error = assert_raises(SystemExit) do
+          with_fake_app(fake) do
+            KamalBackup::CLI.start(["restore", "local"], env: base_env)
+          end
         end
+        assert_equal 1, error.status
       end
-      assert_equal 1, error.status
     end
 
     assert_includes err, "confirmation required"

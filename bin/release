@@ -7,6 +7,7 @@ require "shellwords"
 
 ROOT = File.expand_path("..", __dir__)
 VERSION_FILE = File.join(ROOT, "lib/kamal_backup/version.rb")
+LOCKFILE = File.join(ROOT, "Gemfile.lock")
 DOCS_DIR = File.join(ROOT, "docs")
 
 def abort_with(message)
@@ -14,9 +15,11 @@ def abort_with(message)
   exit(1)
 end
 
-def run(*argv, chdir: ROOT)
+def run(*argv, chdir: ROOT, stdin: nil)
   puts "+ #{argv.shelljoin}"
-  system(*argv, chdir: chdir) || abort_with("Command failed: #{argv.shelljoin}")
+  options = { chdir: chdir }
+  options[:in] = stdin if stdin
+  system(*argv, **options) || abort_with("Command failed: #{argv.shelljoin}")
 end
 
 def capture(*argv, chdir: ROOT)
@@ -26,9 +29,23 @@ def capture(*argv, chdir: ROOT)
   stdout
 end
 
-def ensure_clean_worktree!
-  status = capture("git", "status", "--porcelain")
-  return if status.empty?
+def changed_paths
+  capture("git", "status", "--porcelain").lines.map { |line| line[3..].strip }
+end
+
+def current_version
+  File.read(VERSION_FILE)[/VERSION\s*=\s*["']([^"']+)["']/, 1]
+end
+
+def ensure_releasable_worktree!(version)
+  paths = changed_paths
+  return if paths.empty?
+
+  allowed_paths = ["Gemfile.lock", "lib/kamal_backup/version.rb"]
+  if (paths - allowed_paths).empty? && current_version == version
+    puts "Continuing release #{version} from existing version bump."
+    return
+  end
 
   abort_with("Working tree is not clean. Commit or stash changes before releasing.")
 end
@@ -90,9 +107,9 @@ end
 
 def update_version_file!(version)
   contents = File.read(VERSION_FILE)
-  current = contents[/VERSION\s*=\s*["']([^"']+)["']/, 1]
+  current = current_version
   abort_with("Could not find VERSION assignment in #{VERSION_FILE}.") unless current
-  abort_with("#{VERSION_FILE} is already at #{version}.") if current == version
+  return if current == version
 
   updated = contents.sub(/VERSION\s*=\s*["'][^"']+["']/, "VERSION = #{version.inspect}")
 
@@ -114,18 +131,19 @@ end
 version = parse_version(version_arg)
 tag = "v#{version}"
 
-ensure_clean_worktree!
 ensure_master_branch!
 ensure_current_with_origin!
 ensure_tag_available!(tag)
 ensure_newer_than_latest_tag!(version)
+ensure_releasable_worktree!(version)
 
 update_version_file!(version)
 
 run("git", "diff", "--check")
-run("bin/test")
-run("bundle", "exec", "jekyll", "build", chdir: DOCS_DIR)
-run("git", "add", "lib/kamal_backup/version.rb")
+run("bundle", "install", stdin: File::NULL)
+run("bin/test", stdin: File::NULL)
+run("bundle", "exec", "jekyll", "build", chdir: DOCS_DIR, stdin: File::NULL)
+run("git", "add", VERSION_FILE, LOCKFILE)
 run("git", "commit", "-m", "Release #{version}")
 run("git", "tag", "-a", tag, "-m", "Release #{tag}")
 
