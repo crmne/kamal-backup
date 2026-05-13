@@ -37,6 +37,17 @@ def current_version
   File.read(VERSION_FILE)[/VERSION\s*=\s*["']([^"']+)["']/, 1]
 end
 
+def locked_version
+  File.read(LOCKFILE)[/^\s{4}kamal-backup \(([^)]+)\)$/, 1]
+end
+
+def ensure_lockfile_version!(version)
+  locked = locked_version
+  return if locked == version
+
+  abort_with("Gemfile.lock records kamal-backup #{locked || "unknown"}, expected #{version}.")
+end
+
 def ensure_releasable_worktree!(version)
   paths = changed_paths
   return if paths.empty?
@@ -141,6 +152,7 @@ update_version_file!(version)
 
 run("git", "diff", "--check")
 run("bundle", "install", stdin: File::NULL)
+ensure_lockfile_version!(version)
 run("bin/test", stdin: File::NULL)
 run("bundle", "exec", "jekyll", "build", chdir: DOCS_DIR, stdin: File::NULL)
 run("git", "add", VERSION_FILE, LOCKFILE)
