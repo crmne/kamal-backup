@@ -76,21 +76,6 @@ def ensure_current_with_origin!
   abort_with("Local master does not contain origin/master. Pull or rebase before releasing.")
 end
 
-def ensure_tag_available!(tag)
-  local_tag = system("git", "rev-parse", "--quiet", "--verify", "refs/tags/#{tag}", out: File::NULL, err: File::NULL, chdir: ROOT)
-  abort_with("Local tag #{tag} already exists.") if local_tag
-
-  _, stderr, status = Open3.capture3("git", "ls-remote", "--exit-code", "--tags", "origin", tag, chdir: ROOT)
-  case status.exitstatus
-  when 0
-    abort_with("Remote tag #{tag} already exists.")
-  when 2
-    nil
-  else
-    abort_with(stderr.empty? ? "Could not check remote tag #{tag}." : stderr)
-  end
-end
-
 def ensure_newer_than_latest_tag!(version)
   latest_tag = capture("git", "tag", "--sort=-v:refname", "--list", "v*").lines.map(&:strip).find do |tag|
     Gem::Version.correct?(tag.sub(/\Av/i, ""))
@@ -144,7 +129,6 @@ tag = "v#{version}"
 
 ensure_master_branch!
 ensure_current_with_origin!
-ensure_tag_available!(tag)
 ensure_newer_than_latest_tag!(version)
 ensure_releasable_worktree!(version)
 
@@ -157,11 +141,10 @@ run("bin/test", stdin: File::NULL)
 run("bundle", "exec", "jekyll", "build", chdir: DOCS_DIR, stdin: File::NULL)
 run("git", "add", VERSION_FILE, LOCKFILE)
 run("git", "commit", "-m", "Release #{version}")
-run("git", "tag", "-a", tag, "-m", "Release #{tag}")
 
 if push
-  run("git", "push", "origin", "master", tag)
-  puts "Release #{tag} pushed. CI will publish the gem, Docker images, GitHub release, and docs from the release commit."
+  run("git", "push", "origin", "master")
+  puts "Release #{tag} pushed. CI will publish the gem and Docker images, then create the tag, GitHub release, and docs."
 else
-  puts "Release #{tag} prepared locally. Push with: git push origin master #{tag}"
+  puts "Release #{tag} prepared locally. Push with: git push origin master"
 end

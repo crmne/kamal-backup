@@ -21,9 +21,94 @@ jobs:
           bundler-cache: true
       - run: bin/test
 
-  image:
+  release_gate:
     runs-on: ubuntu-latest
     needs: test
+    outputs:
+      publish_artifacts: ${{ steps.check_release.outputs.publish_artifacts }}
+      should_release: ${{ steps.check_release.outputs.should_release }}
+      stable: ${{ steps.check_release.outputs.stable }}
+      tag: ${{ steps.check_release.outputs.tag }}
+      version: ${{ steps.check_release.outputs.version }}
+      version_changed: ${{ steps.check_release.outputs.version_changed }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: "3.3"
+
+      - name: Check release state
+        id: check_release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          VERSION=$(ruby -r ./lib/kamal_backup/version -e 'puts KamalBackup::VERSION')
+          TAG="v${VERSION}"
+
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+
+          if ruby -rrubygems/version -e 'exit Gem::Version.new(ARGV.fetch(0)).prerelease? ? 0 : 1' "$VERSION"; then
+            echo "stable=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "stable=true" >> "$GITHUB_OUTPUT"
+          fi
+
+          GEM_NAME="kamal-backup"
+          ALL_PUBLISHED_VERSIONS=$(( \
+            gem list ^${GEM_NAME}$ -r --all 2>/dev/null || true; \
+            gem list ^${GEM_NAME}$ -r --prerelease 2>/dev/null || true; \
+          ) | sed -n 's/.*(\(.*\)).*/\1/p' \
+            | tr ',' '\n' \
+            | sed 's/^[[:space:]]*//;s/[[:space:]]*$//' \
+            | sed '/^$/d' \
+            | sort -u )
+
+          if echo "$ALL_PUBLISHED_VERSIONS" | grep -Fxq "$VERSION"; then
+            version_changed=false
+          else
+            version_changed=true
+          fi
+          echo "version_changed=${version_changed}" >> "$GITHUB_OUTPUT"
+
+          if git ls-remote --exit-code --tags origin "refs/tags/${TAG}" >/dev/null 2>&1; then
+            tag_missing=false
+          else
+            tag_missing=true
+          fi
+
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            release_missing=false
+          else
+            release_missing=true
+          fi
+
+          release_ref=false
+          if [ "$GITHUB_REF" = "refs/heads/${{ github.event.repository.default_branch }}" ] || [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            release_ref=true
+          fi
+
+          if [ "$release_ref" = "true" ] && { [ "$version_changed" = "true" ] || [ "$tag_missing" = "true" ]; }; then
+            echo "publish_artifacts=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "publish_artifacts=false" >> "$GITHUB_OUTPUT"
+          fi
+
+          if [ "$release_ref" = "true" ] && { [ "$version_changed" = "true" ] || [ "$tag_missing" = "true" ] || [ "$release_missing" = "true" ]; }; then
+            echo "should_release=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "should_release=false" >> "$GITHUB_OUTPUT"
+          fi
+
+  image:
+    runs-on: ubuntu-latest
+    needs: [test, release_gate]
     steps:
       - uses: actions/checkout@v4
 
@@ -37,6 +122,8 @@ jobs:
               echo "::error::Git tag $GITHUB_REF_NAME does not match KamalBackup::VERSION $VERSION"
               exit 1
             fi
+            echo "version_tag=true" >> "$GITHUB_OUTPUT"
+          elif [ "${{ needs.release_gate.outputs.publish_artifacts }}" = "true" ]; then
             echo "version_tag=true" >> "$GITHUB_OUTPUT"
           else
             echo "version_tag=false" >> "$GITHUB_OUTPUT"
@@ -79,7 +166,7 @@ jobs:
 
   gem:
     runs-on: ubuntu-latest
-    needs: test
+    needs: [test, release_gate]
     steps:
       - uses: actions/checkout@v4
 
@@ -102,13 +189,13 @@ jobs:
           '
 
       - name: Check if version needs publishing
-        if: github.event_name != 'pull_request' && startsWith(github.ref, 'refs/tags/v')
+        if: github.event_name != 'pull_request' && (needs.release_gate.outputs.should_release == 'true' || startsWith(github.ref, 'refs/tags/v'))
         id: check_version
         run: |
           set -euo pipefail
 
           VERSION=$(ruby -r ./lib/kamal_backup/version -e 'puts KamalBackup::VERSION')
-          if [ "$GITHUB_REF_NAME" != "v$VERSION" ]; then
+          if [[ "$GITHUB_REF" == refs/tags/v* ]] && [ "$GITHUB_REF_NAME" != "v$VERSION" ]; then
             echo "::error::Git tag $GITHUB_REF_NAME does not match KamalBackup::VERSION $VERSION"
             exit 1
           fi
@@ -153,8 +240,8 @@ jobs:
 
   release:
     runs-on: ubuntu-latest
-    needs: [test, image, gem]
-    if: github.event_name != 'pull_request' && startsWith(github.ref, 'refs/tags/v')
+    needs: [test, release_gate, image, gem]
+    if: github.event_name != 'pull_request' && (needs.release_gate.outputs.should_release == 'true' || startsWith(github.ref, 'refs/tags/v'))
     permissions:
       contents: write
     steps:
@@ -171,11 +258,28 @@ jobs:
           set -euo pipefail
 
           VERSION=$(ruby -r ./lib/kamal_backup/version -e 'puts KamalBackup::VERSION')
-          TAG="$GITHUB_REF_NAME"
+          TAG="v${VERSION}"
+          release_target="$GITHUB_SHA"
 
-          if [ "$TAG" != "v$VERSION" ]; then
+          if [[ "$GITHUB_REF" == refs/tags/v* ]] && [ "$GITHUB_REF_NAME" != "$TAG" ]; then
             echo "::error::Git tag $TAG does not match KamalBackup::VERSION $VERSION"
             exit 1
+          fi
+
+          git fetch --tags --force
+
+          if git rev-parse -q --verify "refs/tags/${TAG}" >/dev/null; then
+            tag_sha=$(git rev-list -n 1 "${TAG}")
+            if [ "$tag_sha" != "$GITHUB_SHA" ] && [ "${{ needs.release_gate.outputs.version_changed }}" = "true" ]; then
+              echo "::error::Tag ${TAG} already exists at ${tag_sha}, not ${GITHUB_SHA}."
+              exit 1
+            fi
+            release_target="$tag_sha"
+          else
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git tag "$TAG" "$GITHUB_SHA"
+            git push origin "$TAG"
           fi
 
           if gh release view "$TAG" >/dev/null 2>&1; then
@@ -188,18 +292,16 @@ jobs:
             prerelease_args=(--prerelease)
           fi
 
-          git fetch --tags --force
-
           previous_tag=$(git tag --sort=-v:refname --list 'v*' | awk -v current="$TAG" '$0 != current { print; exit }')
           if [ -n "$previous_tag" ]; then
-            commit_range="${previous_tag}..${GITHUB_SHA}"
+            commit_range="${previous_tag}..${release_target}"
           else
-            commit_range="${GITHUB_SHA}"
+            commit_range="${release_target}"
           fi
 
-          commits=$(git log --reverse --format='* %H %s' ${commit_range} | grep -Ev '^\* [0-9a-f]+ (docs|test|chore):' || true)
+          commits=$(git log --reverse --format='* %H %s' "$commit_range" | grep -Ev '^\* [0-9a-f]+ (docs|test|chore):' || true)
           if [ -z "$commits" ]; then
-            commits=$(git log --reverse --format='* %H %s' ${commit_range})
+            commits=$(git log --reverse --format='* %H %s' "$commit_range")
           fi
 
           {
@@ -212,7 +314,7 @@ jobs:
           } > release-notes.md
 
           gh release create "$TAG" \
-            --target "$GITHUB_SHA" \
+            --target "$release_target" \
             --notes-file release-notes.md \
             "${prerelease_args[@]}"
         env:
