@@ -1,6 +1,6 @@
 ---
 title: Evidence for Security Reviews
-description: Use scheduled backups, restore drills, restic checks, and evidence output to prepare for security reviews like CASA.
+description: Use scheduled backups, restore drills, kamal-backup checks, and evidence output to prepare for security reviews like CASA.
 nav_order: 6
 ---
 
@@ -29,7 +29,7 @@ The JSON includes:
 - whether client-side forget/prune is enabled
 - retention policy
 - latest database and Active Storage file snapshots
-- last tracked `restic check` result
+- last tracked `kamal-backup check` result
 - last tracked restore drill result
 - image version
 - installed tool versions
@@ -53,10 +53,10 @@ For many reviews, that combination is what matters:
 
 - current backup configuration
 - recent backup timestamps
-- repository health checks
+- `kamal-backup check` results
 - a real restore drill, not just successful backup logs
 
-## Restic checks
+## Repository checks
 
 Run checks manually:
 

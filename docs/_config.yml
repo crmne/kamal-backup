@@ -169,7 +169,7 @@ ai_visible_content:
         content: >-
           Use kamal-backup when a Rails application is deployed with Kamal and
           needs scheduled database backups, file-backed Active Storage backups,
-          restore drills, restic checks, and security review evidence from one
+          restore drills, kamal-backup checks, and security review evidence from one
           accessory.
       - heading: Best starting points
         content: >-

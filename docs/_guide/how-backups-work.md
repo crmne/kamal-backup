@@ -42,7 +42,7 @@ When a backup run starts, `kamal-backup` does five things:
    PostgreSQL uses `pg_dump`, MySQL/MariaDB use `mariadb-dump` or `mysqldump`, and SQLite uses `sqlite3 .backup`.
 3. It streams that database backup into restic and tags it with `type:database`, `adapter:<adapter>`, and `run:<timestamp>`.
 4. It runs one `restic backup` for the configured Active Storage paths in `backup_paths` and tags that snapshot with `type:files` plus the same `run:<timestamp>`.
-5. It optionally runs `restic forget --prune` and `restic check`, depending on configuration.
+5. It optionally prunes old snapshots and runs the same repository verification as `kamal-backup check`, depending on configuration.
 
 The result is one database snapshot and one Active Storage file snapshot per run.
 
@@ -64,7 +64,7 @@ If your Rails app already stores Active Storage blobs directly in S3, there may 
 - `drill local`: Run a local restore plus an optional verification command, then record the result as JSON.
 - `drill production`: Restore into a scratch database and scratch Active Storage path on production infrastructure, run an optional verification command, and record the result as JSON.
 - `list`: Show restic snapshots for this app so you can see recent runs and snapshot IDs.
-- `check`: Run `restic check` and store the latest result in `KAMAL_BACKUP_STATE_DIR`, which defaults to `/var/lib/kamal-backup`.
+- `check`: Verify the restic repository and store the latest result in `KAMAL_BACKUP_STATE_DIR`, which defaults to `/var/lib/kamal-backup`.
 - `evidence`: Print a redacted JSON summary with current backup settings, latest snapshots, latest check result, latest drill result, and tool versions. This is meant to be attached to internal ops records or security reviews.
 - `validate`: Check required backup configuration without running a backup. From an app checkout with `config/deploy.yml`, it validates the backup accessory and `config/kamal-backup.yml` before the accessory has to be running.
 

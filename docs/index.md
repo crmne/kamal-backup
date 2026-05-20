@@ -1,21 +1,21 @@
 ---
 layout: home
 title: kamal-backup Documentation
-description: "The easiest scheduled backup setup for Rails apps deployed with Kamal: databases, file-backed Active Storage, restore drills, and security review evidence."
+description: "Add scheduled, encrypted backups to Rails apps deployed with Kamal: database dumps, Active Storage files, restore drills, and review evidence."
 permalink: /
 hero:
   name: kamal-backup
-  text: Scheduled backups for Rails apps deployed with Kamal
-  tagline: Back up PostgreSQL, MySQL, SQLite, and file-backed Active Storage files from one Kamal accessory, then run restore drills and produce evidence for security reviews like CASA.
+  text: Add scheduled Rails backups to Kamal
+  tagline: Run encrypted database and Active Storage backups from one Kamal accessory, with restore drills and review evidence built in.
   actions:
     - theme: brand
-      text: Get Started
+      text: Install kamal-backup
       link: /getting-started/
     - theme: alt
-      text: How It Works
+      text: See How Backups Work
       link: /how-backups-work/
     - theme: alt
-      text: GitHub
+      text: View on GitHub
       link: https://github.com/crmne/kamal-backup
   image:
     src: /assets/images/logo.svg
@@ -24,15 +24,15 @@ hero:
     height: 256
 features:
   - icon: 🕒
-    title: Runs on a Schedule
-    details: Boot the accessory and it runs `kamal-backup schedule` by default. Set `backup_schedule_seconds` and keep daily backups moving without cron glue.
+    title: Scheduled backups from one accessory
+    details: Run `kamal-backup init`, fill in the generated config, and boot the accessory. The container runs `kamal-backup schedule` by default.
   - icon: 🗄️
-    title: Databases and Active Storage
-    details: Back up PostgreSQL, MySQL/MariaDB, or SQLite with database-native tools, plus file-backed Active Storage files from mounted volumes such as `/data/storage`.
+    title: Database and file snapshots
+    details: Dump PostgreSQL, MySQL/MariaDB, or SQLite with native tools, then snapshot file-backed Active Storage volumes through restic.
   - icon: 🔒
-    title: Restore Drills Built In
-    details: Restore locally or into scratch production-side targets, run verification commands, and record the result instead of trusting backup logs.
+    title: Restores you can rehearse
+    details: Restore production backups locally or into scratch production-side targets, run verification commands, and record the result.
   - icon: ✅
-    title: Evidence for Security Reviews
-    details: Produce redacted JSON with latest database and Active Storage snapshots, `restic check`, restore drills, retention settings, and tool versions for security reviews like CASA.
+    title: Evidence for reviews
+    details: Emit redacted JSON with latest snapshots, `kamal-backup check` results, restore drills, retention settings, and tool versions for CASA-style security reviews.
 ---

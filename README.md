@@ -4,7 +4,7 @@
 
 <h1>kamal-backup</h1>
 
-<strong>The easiest way to run scheduled backups for a Rails app deployed with Kamal.</strong>
+<strong>Add scheduled Rails backups to Kamal with one accessory.</strong>
 
 [![Gem Version](https://img.shields.io/gem/v/kamal-backup.svg)](https://rubygems.org/gems/kamal-backup)
 [![CI](https://github.com/crmne/kamal-backup/actions/workflows/ci.yml/badge.svg)](https://github.com/crmne/kamal-backup/actions/workflows/ci.yml)
@@ -20,7 +20,7 @@ Backups for Rails apps deployed with Kamal should not become a separate ops proj
 
 `kamal-backup` is one Kamal accessory that runs encrypted backups for your Rails database and file-backed Active Storage files on a schedule. It also gives you restore drills and redacted evidence for security reviews like CASA.
 
-If you already deploy with Kamal, backups should feel like adding one more accessory.
+Run `kamal-backup init`, fill in one config file, add the accessory, then boot it. If you already deploy with Kamal, backups should feel like adding one more accessory.
 
 ## Why Rails teams use it
 
@@ -28,11 +28,11 @@ Most self-hosted Rails apps need the same things:
 
 - scheduled backups for PostgreSQL, MySQL/MariaDB, or SQLite
 - file-backed Active Storage backups from mounted volumes
-- a fast way to restore production data locally
+- local restores for inspecting production data safely
 - restore drills that do not touch the live production database
 - evidence that says more than "the backup ran"
 
-`kamal-backup` packages that workflow into a small Ruby gem, a production accessory image, and a restic repository.
+`kamal-backup` wraps that workflow in a small Ruby gem and a production accessory image backed by a restic repository.
 
 ## Quick start
 
@@ -95,11 +95,12 @@ bin/kamal accessory boot backup
 bin/kamal accessory logs backup
 ```
 
-Run the first backup and print evidence. From an app checkout with `config/deploy.yml`, these commands shell out through Kamal to the backup accessory:
+Run the first backup, check the repository, and print evidence. From an app checkout with `config/deploy.yml`, these commands shell out through Kamal to the backup accessory:
 
 ```sh
 bundle exec kamal-backup backup
 bundle exec kamal-backup list
+bundle exec kamal-backup check
 bundle exec kamal-backup evidence
 ```
 
@@ -108,9 +109,9 @@ bundle exec kamal-backup evidence
 - **Scheduled backups:** the accessory runs continuously and backs up on `backup_schedule_seconds`.
 - **Database and Active Storage coverage:** database dumps plus file-backed Active Storage files from mounted volumes.
 - **Restic underneath:** encrypted, deduplicated snapshots in S3-compatible storage, a restic REST server, or a filesystem repository.
-- **Local restores:** pull production backups into your local Rails app when you need to inspect real data.
-- **Restore drills:** restore into scratch production-side targets and record the result.
-- **Security review evidence:** `kamal-backup evidence` prints redacted JSON with latest snapshots, checks, drills, retention, and tool versions.
+- **Local restores:** inspect production data safely in your local Rails app.
+- **Restore drills:** restore into scratch production-side targets, run verification commands, and record the result.
+- **Security review evidence:** `kamal-backup evidence` prints redacted JSON with latest snapshots, `kamal-backup check` results, drills, retention, and tool versions.
 
 ## Docs
 

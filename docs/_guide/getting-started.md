@@ -4,7 +4,7 @@ description: Add one Kamal accessory that runs scheduled backups for your databa
 nav_order: 1
 ---
 
-`kamal-backup` is meant to feel like the Rails/Kamal-native path: add a gem, add one accessory, point it at a restic repository, and let the accessory run backups on a schedule.
+Run `kamal-backup init`, fill in one config file, add one Kamal accessory, then boot it. The accessory runs scheduled database and Active Storage backups from there.
 
 This guide assumes:
 
@@ -48,8 +48,6 @@ backup_schedule_seconds: 86400
 {: data-title="config/kamal-backup.yml"}
 
 For most Rails apps, `restore local` and `drill local` can infer the local development database, the local `storage` path for Active Storage, and `tmp/kamal-backup` without a second file. Only create `config/kamal-backup.local.yml` when your local targets are nonstandard.
-
-If you want to run `restore local` or `drill local`, install `restic` on your machine too. The backup accessory image already includes it for production-side commands.
 
 ## 2. Choose where backups live
 
@@ -145,6 +143,8 @@ Each backup run creates:
 Database dump snapshots are tagged with `kamal-backup`, `app:<name>`, `type:database`, `adapter:<adapter>`, and `run:<timestamp>`. Active Storage file snapshots use `type:files`, the same run tag, and informational `path:<label>` tags for the configured paths. Restore selects by `type:files`, not by one path tag.
 
 The next useful step is a restore drill:
+
+Local restore and drill commands need the `restic` binary installed on your machine. Production-side commands use the backup accessory image, which already includes it.
 
 ```sh
 bundle exec kamal-backup -d production drill local latest --check "bin/rails runner 'puts User.count'"

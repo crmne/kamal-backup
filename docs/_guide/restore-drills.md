@@ -95,7 +95,7 @@ A typical review-friendly cadence is:
 3. a deliberate `drill production`
 4. `evidence`
 
-## What to Keep for a Security Review
+## What to keep for a security review
 
 The drill JSON is the machine-readable record.
 

@@ -4,7 +4,7 @@ description: YAML-first setup, generated config, deploy mount, secrets, local ov
 nav_order: 3
 ---
 
-## Generate The Backup Config
+## Generate the backup config
 
 Run:
 
@@ -31,7 +31,7 @@ backup_schedule_seconds: 86400
 
 Edit that file for production. It is the main backup configuration: app name, database source, restic repository, file paths, and schedule.
 
-## Default Options
+## Default options
 
 - `accessory`: the Kamal accessory name. The default is `backup`.
 - `app_name`: the app tag used on restic snapshots.
@@ -71,7 +71,7 @@ volumes:
 
 If you require the backup accessory to have no write access to app storage, do not point it at a live WAL database over a read-only mount. Have the writer create a WAL-less snapshot, then point `sqlite_database_path` at that snapshot. That is an advanced hardening tradeoff, not the normal SQLite setup.
 
-## Add The Accessory
+## Add the accessory
 
 Copy the accessory block printed by `init` into your Kamal deploy config, then mount the generated backup config with `files:`.
 
@@ -123,7 +123,7 @@ restic_repository_file: /run/secrets/restic-repository
 ```
 {: data-title="config/kamal-backup.yml"}
 
-## Validate Before Boot
+## Validate before boot
 
 Run this before booting or rebooting the accessory:
 
@@ -133,7 +133,7 @@ bundle exec kamal-backup validate
 
 With a normal `config/deploy.yml`, `validate` checks the backup accessory config before the accessory has to be running. It catches missing app, database, restic, backup path settings, and required Kamal secrets that resolve to empty values.
 
-## Local Restores
+## Local restores
 
 For normal Rails apps, no local backup config is needed. `restore local` and `drill local` infer:
 
@@ -152,7 +152,7 @@ state_dir: tmp/kamal-backup
 ```
 {: data-title="config/kamal-backup.local.yml"}
 
-## Useful Options
+## Useful options
 
 These options are supported but not included in the generated default config:
 

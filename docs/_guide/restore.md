@@ -4,7 +4,7 @@ description: Restore database and Active Storage backups onto your local machine
 nav_order: 4
 ---
 
-`restore` means "put data back."
+Use `restore local` to inspect production data safely on your machine, and `restore production` only for deliberate incident recovery.
 
 `kamal-backup` has two restore destinations:
 
@@ -93,7 +93,7 @@ This is intentionally not a quiet operation. `restore production` is for real in
 
 `restore production` does not accept `--yes` as a confirmation shortcut. Interactive use asks you to type the app name and `RESTORE PRODUCTION`. Automation must pass the explicit `--confirm-production-restore` flag.
 
-## Prompts and Safety
+## Prompts and safety
 
 The safety model is:
 
