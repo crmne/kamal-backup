@@ -19,7 +19,9 @@
 <meta name="twitter:title" content="{{ seo_title | escape }}">
 <meta name="twitter:description" content="{{ seo_description | escape }}">
 <meta name="twitter:image" content="{{ seo_image }}">
-{% ai_json_ld %}
+{% if page.url == '/' or page.url == '/index.html' %}
+  {% ai_json_ld %}
+{% endif %}
 {% if page.url == '/' %}
 <script type="application/ld+json">
 {
