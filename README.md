@@ -62,7 +62,7 @@ accessories:
       - config/kamal-backup.yml:/app/config/kamal-backup.yml:ro
     env:
       secret:
-        - PGPASSWORD
+        - DATABASE_PASSWORD
         - RESTIC_PASSWORD
         - AWS_ACCESS_KEY_ID
         - AWS_SECRET_ACCESS_KEY
@@ -76,15 +76,23 @@ For SQLite databases stored on the mounted storage volume, omit `:ro` from that 
 Put the backup settings in `config/kamal-backup.yml`:
 
 ```yaml
+app: chatwithwork
 accessory: backup
-app_name: chatwithwork
-database_adapter: postgres
-database_url: postgres://chatwithwork@chatwithwork-db:5432/chatwithwork_production
-backup_paths:
+databases:
+  - name: app
+    adapter: postgres
+    url: postgres://chatwithwork@chatwithwork-db:5432/chatwithwork_production
+    password:
+      secret: DATABASE_PASSWORD
+paths:
   - /data/storage
-restic_repository: s3:https://s3.example.com/chatwithwork-backups
-restic_init_if_missing: true
-backup_schedule_seconds: 86400
+restic:
+  repository: s3:https://s3.example.com/chatwithwork-backups
+  password:
+    secret: RESTIC_PASSWORD
+  init_if_missing: true
+backup:
+  schedule: 1d
 ```
 
 Boot it. The container runs `kamal-backup schedule` by default:
@@ -106,7 +114,7 @@ bundle exec kamal-backup evidence
 
 ## What you get
 
-- **Scheduled backups:** the accessory runs continuously and backs up on `backup_schedule_seconds`.
+- **Scheduled backups:** the accessory runs continuously and backs up on `backup.schedule`.
 - **Database and Active Storage coverage:** database dumps plus file-backed Active Storage files from mounted volumes.
 - **Restic underneath:** encrypted, deduplicated snapshots in S3-compatible storage, a restic REST server, or a filesystem repository.
 - **Local restores:** inspect production data safely in your local Rails app.

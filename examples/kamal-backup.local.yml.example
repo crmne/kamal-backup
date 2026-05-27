@@ -1,5 +1,9 @@
 # Only needed when local restore targets do not match Rails defaults.
-database_url: postgres://localhost/chatwithwork_development
-backup_paths:
+databases:
+  - name: app
+    adapter: postgres
+    url: postgres://localhost/chatwithwork_development
+paths:
   - storage
-state_dir: tmp/kamal-backup
+state:
+  path: tmp/kamal-backup

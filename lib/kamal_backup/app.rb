@@ -33,7 +33,7 @@ module KamalBackup
 
       timestamp = current_timestamp
       restic.ensure_repository
-      database.backup(restic, timestamp)
+      databases.each { |database| database.backup(restic, timestamp) }
       restic.backup_paths(config.backup_paths, tags: ["type:files", "run:#{timestamp}"])
 
       if config.forget_after_backup?
@@ -57,14 +57,10 @@ module KamalBackup
       require_restic!
 
       build_restore_result("local", snapshot) do |result|
-        adapter = database
-        validate_local_machine_database_target(adapter)
-        result[:database] = perform_database_restore_to_current(snapshot, adapter: adapter)
-        result[:files] = perform_replacement_file_restore(
-          snapshot,
-          source_paths: config.local_restore_source_paths,
-          target_paths: config.backup_paths
-        )
+        databases.each { |adapter| validate_local_machine_database_target(adapter) }
+        database_results = perform_database_restores_to_current(snapshot)
+        file_results = perform_replacement_file_restores(snapshot, production_source: false)
+        assign_restore_results(result, database_results, file_results)
       end
     end
 
@@ -73,13 +69,9 @@ module KamalBackup
       require_restic!
 
       build_restore_result("production", snapshot) do |result|
-        adapter = database
-        result[:database] = perform_database_restore_to_current(snapshot, adapter: adapter)
-        result[:files] = perform_replacement_file_restore(
-          snapshot,
-          source_paths: config.backup_paths,
-          target_paths: config.backup_paths
-        )
+        database_results = perform_database_restores_to_current(snapshot)
+        file_results = perform_replacement_file_restores(snapshot, production_source: true)
+        assign_restore_results(result, database_results, file_results)
       end
     end
 
@@ -88,14 +80,10 @@ module KamalBackup
       require_restic!
 
       run_drill("local", snapshot, check_command: check_command) do |result|
-        adapter = database
-        validate_local_machine_database_target(adapter)
-        result[:database] = perform_database_restore_to_current(snapshot, adapter: adapter)
-        result[:files] = perform_replacement_file_restore(
-          snapshot,
-          source_paths: config.local_restore_source_paths,
-          target_paths: config.backup_paths
-        )
+        databases.each { |adapter| validate_local_machine_database_target(adapter) }
+        database_results = perform_database_restores_to_current(snapshot)
+        file_results = perform_replacement_file_restores(snapshot, production_source: false)
+        assign_restore_results(result, database_results, file_results)
       end
     end
 
@@ -104,14 +92,16 @@ module KamalBackup
       require_restic!
 
       run_drill("production", snapshot, check_command: check_command) do |result|
-        adapter = database
-        result[:database] = perform_database_restore_to_scratch(
-          snapshot,
-          adapter: adapter,
-          database_name: database_name,
-          sqlite_path: sqlite_path
-        )
-        result[:files] = perform_file_restore(snapshot, target: file_target)
+        database_results = databases.map do |adapter|
+          perform_database_restore_to_scratch(
+            snapshot,
+            adapter: adapter,
+            database_name: database_name,
+            sqlite_path: sqlite_path
+          )
+        end
+        file_results = [perform_file_restore(snapshot, target: file_target)]
+        assign_restore_results(result, database_results, file_results)
       end
     end
 
@@ -160,7 +150,9 @@ module KamalBackup
           finished_at: nil,
           error: nil,
           database: nil,
-          files: nil
+          databases: [],
+          files: nil,
+          paths: nil
         )
         yield(result)
         result[:finished_at] = Time.now.utc.iso8601
@@ -179,7 +171,9 @@ module KamalBackup
           finished_at: nil,
           error: nil,
           database: nil,
+          databases: [],
           files: nil,
+          paths: nil,
           check: nil
         )
 
@@ -206,8 +200,8 @@ module KamalBackup
       end
 
       def perform_database_restore_to_current(snapshot, adapter:)
-        resolved_snapshot = resolve_snapshot(snapshot, tags: ["type:database", "adapter:#{adapter.adapter_name}"])
-        filename = restic.database_file(resolved_snapshot, adapter.adapter_name)
+        resolved_snapshot = resolve_snapshot(snapshot, tags: database_snapshot_tags(adapter))
+        filename = restic.database_file(resolved_snapshot, adapter.adapter_name, database_name: database_config_name(adapter))
 
         if filename
           adapter.restore_to_current(restic, resolved_snapshot, filename)
@@ -219,14 +213,48 @@ module KamalBackup
 
       def perform_database_restore_to_scratch(snapshot, adapter:, database_name:, sqlite_path:)
         target = scratch_database_target(adapter, database_name, sqlite_path)
-        resolved_snapshot = resolve_snapshot(snapshot, tags: ["type:database", "adapter:#{adapter.adapter_name}"])
-        filename = restic.database_file(resolved_snapshot, adapter.adapter_name)
+        resolved_snapshot = resolve_snapshot(snapshot, tags: database_snapshot_tags(adapter))
+        filename = restic.database_file(resolved_snapshot, adapter.adapter_name, database_name: database_config_name(adapter))
 
         if filename
           adapter.restore_to_scratch(restic, resolved_snapshot, filename, target: target)
           summarize_database_restore(adapter, resolved_snapshot, filename, adapter.scratch_target_identifier(target))
         else
           raise ConfigurationError, "could not find database backup file in snapshot #{resolved_snapshot}"
+        end
+      end
+
+      def perform_database_restores_to_current(snapshot)
+        databases.map { |adapter| perform_database_restore_to_current(snapshot, adapter: adapter) }
+      end
+
+      def perform_replacement_file_restores(snapshot, production_source:)
+        source_paths = production_source ? config.backup_paths : config.local_restore_source_paths
+        [
+          perform_replacement_file_restore(
+            snapshot,
+            source_paths: source_paths,
+            target_paths: config.backup_paths
+          )
+        ]
+      end
+
+      def assign_restore_results(result, database_results, file_results)
+        result[:databases] = database_results
+        result[:database] = database_results.first
+        result[:paths] = file_results.first
+        result[:files] = file_results.size == 1 ? file_results.first : file_results
+      end
+
+      def database_snapshot_tags(adapter)
+        ["type:database", "database:#{database_config_name(adapter)}", "adapter:#{adapter.adapter_name}"]
+      end
+
+      def database_config_name(adapter)
+        if adapter.respond_to?(:config) && adapter.config.respond_to?(:database_name)
+          adapter.config.database_name
+        else
+          config.database_name
         end
       end
 
@@ -290,9 +318,11 @@ module KamalBackup
       def scratch_database_target(adapter, database_name, sqlite_path)
         case adapter.adapter_name
         when "sqlite"
-          sqlite_path || raise(ConfigurationError, "scratch SQLite path is required")
+          target = sqlite_path || raise(ConfigurationError, "scratch SQLite path is required")
+          databases.size > 1 ? File.join(target, "#{database_config_name(adapter)}.sqlite3") : target
         else
-          database_name || raise(ConfigurationError, "scratch database name is required")
+          target = database_name || raise(ConfigurationError, "scratch database name is required")
+          databases.size > 1 ? "#{target}_#{database_config_name(adapter)}" : target
         end
       end
 
@@ -313,11 +343,13 @@ module KamalBackup
         config.validate_database_backup
         config.validate_file_restore_target(file_target)
 
-        case database.adapter_name
-        when "sqlite"
-          raise ConfigurationError, "scratch SQLite path is required" if sqlite_path.to_s.strip.empty?
-        else
-          raise ConfigurationError, "scratch database name is required" if database_name.to_s.strip.empty?
+        databases.each do |adapter|
+          case adapter.adapter_name
+          when "sqlite"
+            raise ConfigurationError, "scratch SQLite path is required" if sqlite_path.to_s.strip.empty?
+          else
+            raise ConfigurationError, "scratch database name is required" if database_name.to_s.strip.empty?
+          end
         end
       end
 
@@ -373,7 +405,17 @@ module KamalBackup
       end
 
       def database
-        @database ||= Databases::Base.build(config, redactor: redactor)
+        databases.first
+      end
+
+      def databases
+        @databases ||= begin
+          if @database
+            Array(@database)
+          else
+            config.databases.map { |database_config| Databases::Base.build(database_config, redactor: redactor) }
+          end
+        end
       end
 
       def resolve_snapshot(argument, tags:)

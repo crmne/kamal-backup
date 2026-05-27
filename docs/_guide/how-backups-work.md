@@ -6,7 +6,7 @@ nav_order: 2
 
 ## The model
 
-`kamal-backup` runs as a Kamal accessory. In normal production use, the accessory runs `kamal-backup schedule`, wakes up on the configured interval, and creates one database snapshot plus one Active Storage file snapshot per run.
+`kamal-backup` runs as a Kamal accessory. In normal production use, the accessory runs `kamal-backup schedule`, wakes up on the configured interval, and creates one snapshot per configured database plus one file snapshot for configured paths.
 
 The goal is simple: scheduled backups for Rails apps deployed with Kamal that are easy to restore, easy to drill, and easy to explain in a security review.
 
@@ -37,14 +37,14 @@ If you choose a `rest:` repository, `kamal-backup` does not install or run that 
 
 When a backup run starts, `kamal-backup` does five things:
 
-1. It validates the app name, restic repository, database settings, and `backup_paths`.
-2. It creates a database backup using the database-native export tool:
+1. It validates the app name, restic repository, database settings, and file paths.
+2. It creates database backups using the database-native export tool:
    PostgreSQL uses `pg_dump`, MySQL/MariaDB use `mariadb-dump` or `mysqldump`, and SQLite uses `sqlite3 .backup`.
-3. It streams that database backup into restic and tags it with `type:database`, `adapter:<adapter>`, and `run:<timestamp>`.
-4. It runs one `restic backup` for the configured Active Storage paths in `backup_paths` and tags that snapshot with `type:files` plus the same `run:<timestamp>`.
+3. It streams each database backup into restic and tags it with `type:database`, `database:<name>`, `adapter:<adapter>`, and `run:<timestamp>`.
+4. It runs one `restic backup` for the configured paths and tags that snapshot with `type:files` and the same `run:<timestamp>`.
 5. It optionally prunes old snapshots and runs the same repository verification as `kamal-backup check`, depending on configuration.
 
-The result is one database snapshot and one Active Storage file snapshot per run.
+The result is one database snapshot per database and one file snapshot per run.
 
 ## What gets backed up
 
@@ -53,7 +53,7 @@ The result is one database snapshot and one Active Storage file snapshot per run
 - your app database: PostgreSQL, MySQL/MariaDB, or SQLite;
 - file-backed Active Storage files that live on mounted volumes.
 
-If your Rails app already stores Active Storage blobs directly in S3, there may be no mounted Active Storage path for `backup_paths` to capture. In that case, `kamal-backup` still covers the database side, but S3 object backup and retention are a separate concern.
+If your Rails app already stores Active Storage blobs directly in S3, there may be no mounted file path to capture. In that case, `kamal-backup` still covers the database side, but S3 object backup and retention are a separate concern.
 
 ## What the commands mean
 
@@ -75,6 +75,7 @@ Database snapshots are tagged with:
 - `kamal-backup`
 - `app:<name>`
 - `type:database`
+- `database:<name>`
 - `adapter:<adapter>`
 - `run:<timestamp>`
 
@@ -86,4 +87,4 @@ Active Storage file snapshots are tagged with:
 - `run:<timestamp>`
 - `path:<label>` for each configured Active Storage path
 
-The shared `run:<timestamp>` tag lets you correlate the database backup and the Active Storage file backup from the same run.
+The shared `run:<timestamp>` tag lets you correlate the database and file backups from the same run.

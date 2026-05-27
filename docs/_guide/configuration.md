@@ -17,44 +17,60 @@ bundle exec kamal-backup init
 The generated backup config looks like this:
 
 ```yaml
+app: your-app
 accessory: backup
-app_name: your-app
-database_adapter: postgres
-database_url: postgres://your-app@your-db:5432/your_app_production
-backup_paths:
+databases:
+  - name: app
+    adapter: postgres
+    url: postgres://your-app@your-db:5432/your_app_production
+    password:
+      secret: DATABASE_PASSWORD
+paths:
   - /data/storage
-restic_repository: s3:https://s3.example.com/your-app-backups
-restic_init_if_missing: true
-backup_schedule_seconds: 86400
+restic:
+  repository: s3:https://s3.example.com/your-app-backups
+  password:
+    secret: RESTIC_PASSWORD
+  init_if_missing: true
+backup:
+  schedule: 1d
 ```
 {: data-title="config/kamal-backup.yml"}
 
-Edit that file for production. It is the main backup configuration: app name, database source, restic repository, file paths, and schedule.
+Edit that file for production. It is the main backup configuration: app name, database sources, restic repository, file paths, and schedule.
+
+`kamal-backup.yml` uses the grouped shape shown above. Older flat YAML keys such as `database_adapter`, `backup_paths`, and `restic_repository` are rejected so configuration stays explicit. See [Upgrading](/upgrading/) when moving from 0.2.
 
 ## Default options
 
 - `accessory`: the Kamal accessory name. The default is `backup`.
-- `app_name`: the app tag used on restic snapshots.
-- `database_adapter`: `postgres`, `mysql`, or `sqlite`.
-- `database_url`: the production database connection string. PostgreSQL can also use libpq variables such as `PGHOST`, `PGDATABASE`, and `PGUSER`; MySQL can use `MYSQL_*` or `MARIADB_*` variables.
-- `backup_paths`: file-backed Active Storage paths to snapshot from mounted volumes.
-- `restic_repository`: the restic repository location, such as S3-compatible storage, a restic REST server, or a filesystem path.
-- `restic_init_if_missing`: run `restic init` when the repository has not been initialized yet.
-- `backup_schedule_seconds`: how often the accessory runs backups. `86400` means once per day.
+- `app`: the app tag used on restic snapshots.
+- `databases`: one or more PostgreSQL, MySQL/MariaDB, or SQLite databases to back up.
+- `paths`: filesystem paths to snapshot from mounted volumes.
+- `restic.repository`: the restic repository location, such as S3-compatible storage, a restic REST server, or a filesystem path.
+- `restic.password.secret`: the Kamal secret env var that contains the restic password.
+- `restic.init_if_missing`: run `restic init` when the repository has not been initialized yet.
+- `backup.schedule`: how often the accessory runs backups. `1d` means once per day.
 
 For MySQL, change the database settings:
 
 ```yaml
-database_adapter: mysql
-database_url: mysql2://app@app-mysql:3306/app_production
+databases:
+  - name: app
+    adapter: mysql
+    url: mysql2://app@app-mysql:3306/app_production
+    password:
+      secret: DATABASE_PASSWORD
 ```
 {: data-title="config/kamal-backup.yml"}
 
 For SQLite, point at the database file inside the accessory:
 
 ```yaml
-database_adapter: sqlite
-sqlite_database_path: /data/storage/production.sqlite3
+databases:
+  - name: app
+    adapter: sqlite
+    path: /data/storage/production.sqlite3
 ```
 {: data-title="config/kamal-backup.yml"}
 
@@ -69,7 +85,7 @@ volumes:
 ```
 {: data-title="config/deploy.yml"}
 
-If you require the backup accessory to have no write access to app storage, do not point it at a live WAL database over a read-only mount. Have the writer create a WAL-less snapshot, then point `sqlite_database_path` at that snapshot. That is an advanced hardening tradeoff, not the normal SQLite setup.
+If you require the backup accessory to have no write access to app storage, do not point it at a live WAL database over a read-only mount. Have the writer create a WAL-less snapshot, then point the SQLite database `path` at that snapshot. That is an advanced hardening tradeoff, not the normal SQLite setup.
 
 ## Add the accessory
 
@@ -84,7 +100,7 @@ accessories:
       - config/kamal-backup.yml:/app/config/kamal-backup.yml:ro
     env:
       secret:
-        - PGPASSWORD
+        - DATABASE_PASSWORD
         - RESTIC_PASSWORD
         - AWS_ACCESS_KEY_ID
         - AWS_SECRET_ACCESS_KEY
@@ -102,24 +118,34 @@ Keep secrets in Kamal secrets:
 
 ```sh
 RESTIC_PASSWORD=...
-PGPASSWORD=...
+DATABASE_PASSWORD=...
 AWS_ACCESS_KEY_ID=...
 AWS_SECRET_ACCESS_KEY=...
 ```
 
-If the repository URL contains credentials, keep `RESTIC_REPOSITORY` in Kamal secrets and omit `restic_repository` from YAML.
+If the repository URL contains credentials, declare it as a secret reference instead:
+
+```yaml
+restic:
+  repository:
+    secret: RESTIC_REPOSITORY
+```
+{: data-title="config/kamal-backup.yml"}
 
 If you do not want the restic password value in the process environment, point restic at a mounted file instead:
 
 ```yaml
-restic_password_file: /run/secrets/restic-password
+restic:
+  password:
+    file: /run/secrets/restic-password
 ```
 {: data-title="config/kamal-backup.yml"}
 
 The same works for the repository string when needed:
 
 ```yaml
-restic_repository_file: /run/secrets/restic-repository
+restic:
+  repository_file: /run/secrets/restic-repository
 ```
 {: data-title="config/kamal-backup.yml"}
 
@@ -145,10 +171,14 @@ For normal Rails apps, no local backup config is needed. `restore local` and `dr
 Only add `config/kamal-backup.local.yml` when your local targets are nonstandard:
 
 ```yaml
-database_url: postgres://localhost/chatwithwork_development
-backup_paths:
+databases:
+  - name: app
+    adapter: postgres
+    url: postgres://localhost/chatwithwork_development
+paths:
   - storage
-state_dir: tmp/kamal-backup
+state:
+  path: tmp/kamal-backup
 ```
 {: data-title="config/kamal-backup.local.yml"}
 
@@ -157,18 +187,19 @@ state_dir: tmp/kamal-backup
 These options are supported but not included in the generated default config:
 
 ```yaml
-restic_check_after_backup: true
-restic_check_read_data_subset: 5%
-restic_forget_after_backup: true
-restic_keep_last: 7
-restic_keep_daily: 7
-restic_keep_weekly: 4
-restic_keep_monthly: 6
-restic_keep_yearly: 2
-backup_start_delay_seconds: 0
+restic:
+  check_after_backup: true
+  check_read_data_subset: 5%
+  forget_after_backup: true
+  retention:
+    keep_last: 7
+    keep_daily: 7
+    keep_weekly: 4
+    keep_monthly: 6
+    keep_yearly: 2
 ```
 {: data-title="config/kamal-backup.yml"}
 
-`restic_forget_after_backup` defaults to enabled unless explicitly set to a falsey value such as `false`, `0`, `no`, `n`, or `off`.
+`restic.forget_after_backup` defaults to enabled unless explicitly set to a falsey value such as `false`, `0`, `no`, `n`, or `off`.
 
 Environment variables can still override YAML values when you need an emergency override, but the clean setup is YAML for configuration and Kamal secrets for secrets.

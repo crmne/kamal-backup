@@ -68,7 +68,9 @@ module KamalBackup
 
         def current_connection
           if value("DATABASE_URL")
-            parse_url(value("DATABASE_URL"))
+            parse_url(value("DATABASE_URL")).tap do |connection|
+              connection[:password] ||= value("MYSQL_PWD") || value("MYSQL_PASSWORD") || value("MARIADB_PASSWORD")
+            end
           else
             connection_from_env("")
           end

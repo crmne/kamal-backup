@@ -52,9 +52,10 @@ class ResticTest < Minitest::Test
       File.write(
         File.join(config_dir, "kamal-backup.yml"),
         <<~YAML
-          app_name: demo
-          restic_repository: s3:https://s3.example.com/demo
-          restic_password: yaml-secret
+          app: demo
+          restic:
+            repository: s3:https://s3.example.com/demo
+            password: yaml-secret
         YAML
       )
 

@@ -17,6 +17,15 @@ Gem::Specification.new do |spec|
     "rubygems_mfa_required" => "true"
   }
 
+  spec.post_install_message = <<~MESSAGE
+    kamal-backup 0.3 changes config/kamal-backup.yml.
+
+    If you are upgrading from 0.2, migrate the old flat YAML keys to the new grouped shape:
+      https://kamal-backup.dev/upgrading/#upgrading-to-03
+
+    Run `bundle exec kamal-backup validate` before rebooting the backup accessory.
+  MESSAGE
+
   spec.files = Dir.chdir(__dir__) do
     Dir["lib/**/*", "exe/*", "README.md", "LICENSE"]
   end

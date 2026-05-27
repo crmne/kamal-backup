@@ -23,12 +23,12 @@ The JSON includes:
 
 - app name
 - current time
-- database adapter
+- configured databases
 - redacted restic repository
-- configured Active Storage backup paths
+- configured file backup paths
 - whether client-side forget/prune is enabled
 - retention policy
-- latest database and Active Storage file snapshots
+- latest database and file snapshots
 - last tracked `kamal-backup check` result
 - last tracked restore drill result
 - image version
@@ -43,7 +43,7 @@ Secrets, passwords, access keys, and database URL credentials are redacted befor
 A practical workflow looks like this:
 
 1. Run backups on a schedule.
-2. Run `kamal-backup check` on a schedule, or enable `RESTIC_CHECK_AFTER_BACKUP=true`.
+2. Run `kamal-backup check` on a schedule, or enable `restic.check_after_backup`.
 3. Run `kamal-backup drill production` against a scratch target, or `kamal-backup drill local` for a smaller app.
 4. Keep a short human note when you want operator context beyond the drill JSON:
    date, operator, snapshot restored, target used, and whether the app data looked correct.
@@ -67,8 +67,9 @@ bin/kamal accessory exec backup "kamal-backup check"
 Or enable checks after successful backups:
 
 ```sh
-RESTIC_CHECK_AFTER_BACKUP=true
-RESTIC_CHECK_READ_DATA_SUBSET=5%
+restic:
+  check_after_backup: true
+  check_read_data_subset: 5%
 ```
 
 The latest check result is stored under `KAMAL_BACKUP_STATE_DIR` and included in evidence output when available. The latest restore drill result is stored there too.

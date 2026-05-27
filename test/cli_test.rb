@@ -264,8 +264,10 @@ class CLITest < Minitest::Test
 
       assert File.file?(File.join(dir, "config", "kamal-backup.yml"))
       assert_includes File.read(File.join(dir, "config", "kamal-backup.yml")), "accessory: backup"
-      assert_includes File.read(File.join(dir, "config", "kamal-backup.yml")), "app_name: your-app"
-      assert_includes File.read(File.join(dir, "config", "kamal-backup.yml")), "backup_schedule_seconds: 86400"
+      assert_includes File.read(File.join(dir, "config", "kamal-backup.yml")), "app: your-app"
+      assert_includes File.read(File.join(dir, "config", "kamal-backup.yml")), "databases:"
+      assert_includes File.read(File.join(dir, "config", "kamal-backup.yml")), "paths:"
+      assert_includes File.read(File.join(dir, "config", "kamal-backup.yml")), "schedule: 1d"
       refute File.exist?(File.join(dir, "config", "kamal-backup.local.yml"))
       assert_includes out, "Add this accessory block to your Kamal deploy config:"
       assert_includes out, "files:"
@@ -482,13 +484,16 @@ class CLITest < Minitest::Test
       File.write(
         File.join(config_dir, "kamal-backup.yml"),
         <<~YAML
+          app: chatwithwork
           accessory: backup
-          app_name: chatwithwork
-          database_adapter: postgres
-          database_url: postgres://chatwithwork@chatwithwork-db:5432/chatwithwork_production
-          backup_paths:
+          databases:
+            - name: app
+              adapter: postgres
+              url: postgres://chatwithwork@chatwithwork-db:5432/chatwithwork_production
+          paths:
             - /data/storage
-          restic_repository: s3:https://s3.example.com/chatwithwork-backups
+          restic:
+            repository: s3:https://s3.example.com/chatwithwork-backups
         YAML
       )
 

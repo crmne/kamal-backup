@@ -13,7 +13,7 @@ Do not put cloud credentials in clear Kamal environment. Use Kamal secrets for:
 - `RESTIC_PASSWORD`;
 - `AWS_ACCESS_KEY_ID`;
 - `AWS_SECRET_ACCESS_KEY`;
-- database passwords such as `PGPASSWORD` and `MYSQL_PWD`.
+- database passwords such as `DATABASE_PASSWORD`, `PGPASSWORD`, or `MYSQL_PWD`.
 
 Store a copy of `RESTIC_PASSWORD` outside the app repository and outside the S3 bucket. Restic repositories are encrypted with that password; without it, the backup data is not recoverable.
 
@@ -35,7 +35,7 @@ This is why the docs talk about database backups rather than raw database direct
 
 File-backed Active Storage files are backed up from configured mounted paths with `restic backup`. In a Kamal accessory, mount the production storage volume read-only when possible so the backup container can read Active Storage files without being able to modify them.
 
-SQLite is the exception when the live database is on that storage volume. Rails SQLite apps commonly use WAL mode, and live WAL backups need normal read-write access to the database, WAL, and shared-memory files. For the normal SQLite setup, mount the storage volume read-write and point `sqlite_database_path` at the live database. If the backup accessory must have no write access to app storage, back up a writer-created WAL-less snapshot instead.
+SQLite is the exception when the live database is on that storage volume. Rails SQLite apps commonly use WAL mode, and live WAL backups need normal read-write access to the database, WAL, and shared-memory files. For the normal SQLite setup, mount the storage volume read-write and point the SQLite database `path` at the live database. If the backup accessory must have no write access to app storage, back up a writer-created WAL-less snapshot instead.
 
 ## Deliberate restores
 

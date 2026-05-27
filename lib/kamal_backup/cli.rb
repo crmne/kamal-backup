@@ -218,15 +218,23 @@ module KamalBackup
 
       def shared_config_template
         <<~YAML
+          app: your-app
           accessory: backup
-          app_name: your-app
-          database_adapter: postgres
-          database_url: postgres://your-app@your-db:5432/your_app_production
-          backup_paths:
+          databases:
+            - name: app
+              adapter: postgres
+              url: postgres://your-app@your-db:5432/your_app_production
+              password:
+                secret: DATABASE_PASSWORD
+          paths:
             - /data/storage
-          restic_repository: s3:https://s3.example.com/your-app-backups
-          restic_init_if_missing: true
-          backup_schedule_seconds: 86400
+          restic:
+            repository: s3:https://s3.example.com/your-app-backups
+            password:
+              secret: RESTIC_PASSWORD
+            init_if_missing: true
+          backup:
+            schedule: 1d
         YAML
       end
 
@@ -240,7 +248,7 @@ module KamalBackup
                 - config/kamal-backup.yml:/app/config/kamal-backup.yml:ro
               env:
                 secret:
-                  - PGPASSWORD
+                  - DATABASE_PASSWORD
                   - RESTIC_PASSWORD
                   - AWS_ACCESS_KEY_ID
                   - AWS_SECRET_ACCESS_KEY
@@ -450,7 +458,7 @@ module KamalBackup
       puts
       puts deploy_snippet
       puts
-      puts "The accessory runs scheduled database and Active Storage backups with backup_schedule_seconds."
+      puts "The accessory runs scheduled database and file backups with backup.schedule."
       puts "For most Rails apps, restore local and drill local can infer the development database, Active Storage path, and tmp state directory."
       puts "Local restore and drill also require the restic binary on your machine."
       puts "Create config/kamal-backup.local.yml only if you need to override those local defaults."

@@ -18,11 +18,14 @@ module KamalBackup
         app_name: @config.app_name,
         generated_at: Time.now.utc.iso8601,
         database_adapter: @config.database_adapter,
+        databases: @config.databases.map { |database| { name: database.database_name, adapter: database.database_adapter } },
         restic_repository: @redactor.redact_string(@config.restic_repository.to_s),
         backup_paths: @config.backup_paths,
+        paths: @config.backup_paths,
         forget_after_backup: @config.forget_after_backup?,
         retention: @config.retention,
         latest_database_backup: latest_snapshot_summary(["type:database"]),
+        latest_database_backups: latest_database_backups,
         latest_file_backup: latest_snapshot_summary(["type:files"]),
         last_restic_check: last_check,
         last_restore_drill: last_restore_drill,
@@ -48,6 +51,16 @@ module KamalBackup
         end
       rescue Error => e
         { error: @redactor.redact_string(e.message) }
+      end
+
+      def latest_database_backups
+        @config.databases.each_with_object({}) do |database, backups|
+          backups[database.database_name] = latest_snapshot_summary([
+            "type:database",
+            "database:#{database.database_name}",
+            "adapter:#{database.database_adapter}"
+          ])
+        end
       end
 
       def last_check

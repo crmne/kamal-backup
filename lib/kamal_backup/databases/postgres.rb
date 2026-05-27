@@ -68,7 +68,9 @@ module KamalBackup
 
         def current_connection
           if value("DATABASE_URL")
-            connection_from_url(value("DATABASE_URL"), "DATABASE_URL")
+            connection_from_url(value("DATABASE_URL"), "DATABASE_URL").tap do |connection|
+              connection["PGPASSWORD"] ||= value("PGPASSWORD") if value("PGPASSWORD")
+            end
           else
             connection = prefixed_env("", SOURCE_ENV_KEYS)
             raise ConfigurationError, "DATABASE_URL or PGDATABASE is required for PostgreSQL restore" unless connection["PGDATABASE"]

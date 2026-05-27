@@ -35,15 +35,23 @@ bundle exec kamal-backup init
 That creates `config/kamal-backup.yml`. Put the production backup settings in that file:
 
 ```yaml
+app: chatwithwork
 accessory: backup
-app_name: chatwithwork
-database_adapter: postgres
-database_url: postgres://chatwithwork@chatwithwork-db:5432/chatwithwork_production
-backup_paths:
+databases:
+  - name: app
+    adapter: postgres
+    url: postgres://chatwithwork@chatwithwork-db:5432/chatwithwork_production
+    password:
+      secret: DATABASE_PASSWORD
+paths:
   - /data/storage
-restic_repository: s3:https://s3.example.com/chatwithwork-backups
-restic_init_if_missing: true
-backup_schedule_seconds: 86400
+restic:
+  repository: s3:https://s3.example.com/chatwithwork-backups
+  password:
+    secret: RESTIC_PASSWORD
+  init_if_missing: true
+backup:
+  schedule: 1d
 ```
 {: data-title="config/kamal-backup.yml"}
 
@@ -72,7 +80,7 @@ accessories:
       - config/kamal-backup.yml:/app/config/kamal-backup.yml:ro
     env:
       secret:
-        - PGPASSWORD
+        - DATABASE_PASSWORD
         - RESTIC_PASSWORD
         - AWS_ACCESS_KEY_ID
         - AWS_SECRET_ACCESS_KEY
@@ -96,7 +104,7 @@ bin/kamal accessory logs backup
 
 `validate` catches missing required backup settings before the accessory has to be running.
 
-The container default command is `kamal-backup schedule`, so once the accessory is up it starts running scheduled backups. In the example above, `backup_schedule_seconds: 86400` means one backup per day.
+The container default command is `kamal-backup schedule`, so once the accessory is up it starts running scheduled backups. In the example above, `backup.schedule: 1d` means one backup per day.
 
 The `/var/lib/kamal-backup` volume preserves the latest `check` and restore drill records across accessory reboots. Keep it mounted if you want `kamal-backup evidence` to include recent operational proof after the container is recreated.
 
@@ -137,10 +145,10 @@ bundle exec kamal-backup -d production schedule
 
 Each backup run creates:
 
-- one database backup stored through restic stdin;
-- one `type:files` restic snapshot containing the configured file-backed Active Storage paths in `backup_paths`.
+- one restic stdin snapshot for each configured database;
+- one `type:files` restic snapshot for the configured paths.
 
-Database dump snapshots are tagged with `kamal-backup`, `app:<name>`, `type:database`, `adapter:<adapter>`, and `run:<timestamp>`. Active Storage file snapshots use `type:files`, the same run tag, and informational `path:<label>` tags for the configured paths. Restore selects by `type:files`, not by one path tag.
+Database dump snapshots are tagged with `kamal-backup`, `app:<name>`, `type:database`, `database:<name>`, `adapter:<adapter>`, and `run:<timestamp>`. File snapshots use `type:files`, the same run tag, and informational `path:<label>` tags for the configured paths.
 
 The next useful step is a restore drill:
 

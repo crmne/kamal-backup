@@ -19,10 +19,10 @@ This is the fast way to pull a production backup down into local development.
 
 When you pass `-d` or `-c`, `kamal-backup` uses `config/kamal-backup.yml` as the production source of truth for:
 
-- `app_name`
-- `database_adapter`
-- `restic_repository`
-- `local_restore_source_paths` from production `backup_paths`
+- `app`
+- the first configured database adapter
+- `restic.repository`
+- production file paths as local restore source paths
 
 For a normal Rails app, the local targets come from Rails conventions:
 
@@ -33,7 +33,7 @@ For a normal Rails app, the local targets come from Rails conventions:
 You still provide the local secrets yourself in env:
 
 - `RESTIC_PASSWORD`
-- `PGPASSWORD` or `MYSQL_PWD` when needed
+- the database password env vars declared in your local config, or `PGPASSWORD`/`MYSQL_PWD` when using env-only settings
 
 And you need the `restic` binary installed locally and available on `PATH`.
 
@@ -54,14 +54,18 @@ What it does:
 If your local targets are nonstandard, create `config/kamal-backup.local.yml`:
 
 ```yaml
-database_url: postgres://localhost/chatwithwork_development
-backup_paths:
+databases:
+  - name: app
+    adapter: postgres
+    url: postgres://localhost/chatwithwork_development
+paths:
   - storage
-state_dir: tmp/kamal-backup
+state:
+  path: tmp/kamal-backup
 ```
 {: data-title="config/kamal-backup.local.yml"}
 
-If the production Active Storage paths differ from your local Active Storage paths and you are not using `-d` or `-c`, set `LOCAL_RESTORE_SOURCE_PATHS` yourself.
+If the production file paths differ from your local file paths and you are not using `-d` or `-c`, set `restore_from` in the local config.
 
 `restore local` refuses to run when `RAILS_ENV`, `RACK_ENV`, `APP_ENV`, or `KAMAL_ENVIRONMENT` is set to `production`.
 
@@ -85,8 +89,8 @@ If you are already inside the accessory container, you can run the command direc
 
 This path uses:
 
-- the accessory's current `database_url` or `sqlite_database_path`
-- the accessory's current `backup_paths`
+- the accessory's current configured databases
+- the accessory's current paths
 - the same restic repository the scheduled backups use
 
 This is intentionally not a quiet operation. `restore production` is for real incident recovery.

@@ -122,14 +122,19 @@ module KamalBackup
       end
     end
 
-    def database_file(snapshot, adapter)
+    def database_file(snapshot, adapter, database_name: nil)
       legacy_prefix = "databases/#{config.app_name}/#{adapter}/"
-      flat_prefix = "databases-#{config.app_name.gsub(/[^A-Za-z0-9_.-]+/, "-")}-#{adapter}-"
+      app = config.app_name.gsub(/[^A-Za-z0-9_.-]+/, "-")
+      database = database_name.to_s.gsub(/[^A-Za-z0-9_.-]+/, "-")
+      flat_prefix = "databases-#{app}-#{adapter}-"
+      named_flat_prefix = database.empty? ? nil : "databases-#{app}-#{database}-#{adapter}-"
       ls_json(snapshot).find do |entry|
         next false unless entry["type"] == "file"
 
         normalized = entry["path"].to_s.sub(%r{\A/+}, "")
-        normalized.start_with?(legacy_prefix) || File.basename(normalized).start_with?(flat_prefix)
+        normalized.start_with?(legacy_prefix) ||
+          File.basename(normalized).start_with?(flat_prefix) ||
+          (named_flat_prefix && File.basename(normalized).start_with?(named_flat_prefix))
       end&.fetch("path")
     end
 

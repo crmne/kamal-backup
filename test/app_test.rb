@@ -48,8 +48,8 @@ class AppTest < Minitest::Test
       end
     end
 
-    def database_file(snapshot, adapter)
-      @database_file_calls << { snapshot: snapshot, adapter: adapter }
+    def database_file(snapshot, adapter, database_name: nil)
+      @database_file_calls << { snapshot: snapshot, adapter: adapter, database_name: database_name }
       "database.dump"
     end
 
@@ -70,11 +70,12 @@ class AppTest < Minitest::Test
   end
 
   class FakeDatabase
-    attr_reader :backup_calls, :current_restore_calls, :scratch_restore_calls
+    attr_reader :backup_calls, :config, :current_restore_calls, :scratch_restore_calls
 
-    def initialize(adapter_name: "sqlite", current_target_identifier: nil)
+    def initialize(adapter_name: "sqlite", current_target_identifier: nil, database_name: "app")
       @adapter_name = adapter_name
       @current_target_identifier = current_target_identifier || default_current_target_identifier(adapter_name)
+      @config = Struct.new(:database_name).new(database_name)
       @backup_calls = []
       @current_restore_calls = []
       @scratch_restore_calls = []
@@ -205,6 +206,53 @@ class AppTest < Minitest::Test
     end
   end
 
+  def test_backup_runs_each_configured_database_and_file_group
+    Dir.mktmpdir do |dir|
+      storage = File.join(dir, "storage")
+      uploads = File.join(dir, "uploads")
+      FileUtils.mkdir_p(storage)
+      FileUtils.mkdir_p(uploads)
+      config_dir = File.join(dir, "config")
+      FileUtils.mkdir_p(config_dir)
+      File.write(
+        File.join(config_dir, "kamal-backup.yml"),
+        <<~YAML
+          app: multi
+          databases:
+            - name: app
+              adapter: postgres
+              url: postgres://multi@postgres:5432/multi_production
+            - name: queue
+              adapter: postgres
+              url: postgres://multi@postgres:5432/multi_queue_production
+          paths:
+            - #{storage}
+            - #{uploads}
+          restic:
+            repository: /tmp/restic-repo
+            password: restic-secret
+        YAML
+      )
+
+      restic = FakeRestic.new
+      app_database = FakeDatabase.new(adapter_name: "postgres", database_name: "app")
+      queue_database = FakeDatabase.new(adapter_name: "postgres", database_name: "queue")
+      app = KamalBackup::App.new(
+        config: KamalBackup::Config.new(env: {}, cwd: dir, load_project_defaults: false),
+        restic: restic,
+        database: [app_database, queue_database]
+      )
+
+      app.backup
+
+      assert_equal 1, app_database.backup_calls.size
+      assert_equal 1, queue_database.backup_calls.size
+      assert_equal 1, restic.backup_path_calls.size
+      assert_equal [storage, uploads], restic.backup_path_calls.first.fetch(:paths)
+      assert_includes restic.backup_path_calls.first.fetch(:tags), "type:files"
+    end
+  end
+
   def test_restore_to_local_machine_restores_database_and_replaces_backup_paths
     Dir.mktmpdir do |dir|
       db = File.join(dir, "app_development.sqlite3")
@@ -232,8 +280,8 @@ class AppTest < Minitest::Test
 
       result = app.restore_to_local_machine("latest")
 
-      assert_equal [%w[type:database adapter:sqlite], %w[type:files]], restic.latest_snapshot_calls
-      assert_equal [{ snapshot: "latest-database-snapshot", adapter: "sqlite" }], restic.database_file_calls
+      assert_equal [["type:database", "database:app", "adapter:sqlite"], ["type:files"]], restic.latest_snapshot_calls
+      assert_equal [{ snapshot: "latest-database-snapshot", adapter: "sqlite", database_name: "app" }], restic.database_file_calls
       assert_equal 1, database.current_restore_calls.size
       assert_equal "latest-database-snapshot", database.current_restore_calls.first.fetch(:snapshot)
       assert_equal 1, restic.restore_snapshot_calls.size

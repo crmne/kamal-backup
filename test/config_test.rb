@@ -32,13 +32,15 @@ class ConfigTest < Minitest::Test
       File.write(
         File.join(config_dir, "kamal-backup.local.yml"),
         <<~YAML
-          app_name: local-app
-          database_adapter: sqlite
-          sqlite_database_path: tmp/development.sqlite3
-          backup_paths:
+          app: local-app
+          databases:
+            - name: app
+              adapter: sqlite
+              path: tmp/development.sqlite3
+          paths:
             - storage
             - tmp/uploads
-          local_restore_source_paths:
+          restore_from:
             - /data/storage
             - /data/uploads
         YAML
@@ -48,7 +50,7 @@ class ConfigTest < Minitest::Test
 
       assert_equal "local-app", config.app_name
       assert_equal "sqlite", config.database_adapter
-      assert_equal "tmp/development.sqlite3", config.value("SQLITE_DATABASE_PATH")
+      assert_equal "tmp/development.sqlite3", config.databases.first.value("SQLITE_DATABASE_PATH")
       assert_equal ["storage", "tmp/uploads"], config.backup_paths
       assert_equal ["/data/storage", "/data/uploads"], config.local_restore_source_paths
     end
@@ -65,9 +67,11 @@ class ConfigTest < Minitest::Test
       File.write(
         File.join(config_dir, "kamal-backup.yml"),
         <<~YAML
-          app_name: file-app
-          restic_repository_file: #{repository_file}
-          restic_password_file: #{password_file}
+          app: file-app
+          restic:
+            repository_file: #{repository_file}
+            password:
+              file: #{password_file}
         YAML
       )
 
@@ -116,7 +120,7 @@ class ConfigTest < Minitest::Test
       File.write(
         File.join(config_dir, "kamal-backup.local.yml"),
         <<~YAML
-          app_name: file-app
+          app: file-app
         YAML
       )
 
@@ -200,16 +204,201 @@ class ConfigTest < Minitest::Test
       File.write(
         File.join(config_dir, "kamal-backup.local.yml"),
         <<~YAML
-          sqlite_database_path: custom/dev.sqlite3
-          backup_paths:
+          databases:
+            - name: app
+              adapter: sqlite
+              path: custom/dev.sqlite3
+          paths:
             - uploads
         YAML
       )
 
       config = KamalBackup::Config.new(env: { "RESTIC_REPOSITORY" => "/tmp/restic", "RESTIC_PASSWORD" => "secret" }, cwd: dir)
 
-      assert_equal "custom/dev.sqlite3", config.value("SQLITE_DATABASE_PATH")
+      assert_equal "custom/dev.sqlite3", config.databases.first.value("SQLITE_DATABASE_PATH")
       assert_equal ["uploads"], config.backup_paths
+    end
+  end
+
+  def test_loads_grouped_yaml_config_with_secret_references_and_durations
+    Dir.mktmpdir do |dir|
+      config_dir = File.join(dir, "config")
+      FileUtils.mkdir_p(config_dir)
+      File.write(
+        File.join(config_dir, "kamal-backup.yml"),
+        <<~YAML
+          app: grouped-app
+          accessory: backup
+          databases:
+            - name: app
+              adapter: postgres
+              url: postgres://grouped@postgres:5432/grouped_production
+              password:
+                secret: APP_DATABASE_PASSWORD
+            - name: queue
+              adapter: postgres
+              url:
+                secret: QUEUE_DATABASE_URL
+          paths:
+            - /data/storage
+          restic:
+            repository: s3:https://s3.example.com/grouped
+            password:
+              secret: BACKUP_RESTIC_PASSWORD
+            init_if_missing: true
+            retention:
+              keep_last: 3
+          backup:
+            schedule: 1d
+          state:
+            path: /state
+        YAML
+      )
+
+      config = KamalBackup::Config.new(
+        env: {
+          "APP_DATABASE_PASSWORD" => "app-secret",
+          "QUEUE_DATABASE_URL" => "postgres://queue:queue-secret@postgres:5432/queue_production",
+          "BACKUP_RESTIC_PASSWORD" => "restic-secret"
+        },
+        cwd: dir,
+        load_project_defaults: false
+      )
+
+      assert_equal "grouped-app", config.app_name
+      assert_equal "backup", config.accessory_name
+      assert_equal %w[app queue], config.databases.map(&:database_name)
+      assert_equal "app-secret", config.databases.first.value("PGPASSWORD")
+      assert_equal "postgres://queue:queue-secret@postgres:5432/queue_production", config.databases.last.value("DATABASE_URL")
+      assert_equal ["/data/storage"], config.backup_paths
+      assert_equal "s3:https://s3.example.com/grouped", config.restic_repository
+      assert_equal "restic-secret", config.restic_password
+      assert_equal 86_400, config.backup_schedule_seconds
+      assert_equal "/state", config.state_dir
+      assert_includes config.retention_args, "3"
+    end
+  end
+
+  def test_legacy_yaml_keys_are_rejected
+    Dir.mktmpdir do |dir|
+      config_dir = File.join(dir, "config")
+      FileUtils.mkdir_p(config_dir)
+      File.write(
+        File.join(config_dir, "kamal-backup.yml"),
+        <<~YAML
+          app_name: old-app
+        YAML
+      )
+
+      error = assert_raises(KamalBackup::ConfigurationError) do
+        KamalBackup::Config.new(env: {}, cwd: dir, load_project_defaults: false)
+      end
+
+      assert_match(/legacy key app_name/, error.message)
+    end
+  end
+
+  def test_validate_backup_rejects_missing_declared_database_secret
+    Dir.mktmpdir do |dir|
+      files = File.join(dir, "storage")
+      FileUtils.mkdir_p(files)
+      config_dir = File.join(dir, "config")
+      FileUtils.mkdir_p(config_dir)
+      File.write(
+        File.join(config_dir, "kamal-backup.yml"),
+        <<~YAML
+          app: missing-secret
+          databases:
+            - name: app
+              adapter: postgres
+              url: postgres://app@postgres:5432/app_production
+              password:
+                secret: APP_DATABASE_PASSWORD
+          paths:
+            - #{files}
+          restic:
+            repository: /tmp/restic-repo
+            password: restic-secret
+        YAML
+      )
+
+      config = KamalBackup::Config.new(env: {}, cwd: dir, load_project_defaults: false)
+
+      error = assert_raises(KamalBackup::ConfigurationError) { config.validate_backup }
+      assert_match(/APP_DATABASE_PASSWORD/, error.message)
+    end
+  end
+
+  def test_empty_grouped_databases_do_not_fall_back_to_env_database_settings
+    Dir.mktmpdir do |dir|
+      config_dir = File.join(dir, "config")
+      FileUtils.mkdir_p(config_dir)
+      File.write(
+        File.join(config_dir, "kamal-backup.yml"),
+        <<~YAML
+          app: empty-db
+          databases: []
+          restic:
+            repository: /tmp/restic-repo
+            password: restic-secret
+        YAML
+      )
+
+      config = KamalBackup::Config.new(
+        env: { "DATABASE_URL" => "postgres://app@db/app" },
+        cwd: dir,
+        load_project_defaults: false
+      )
+
+      assert_empty config.databases
+      error = assert_raises(KamalBackup::ConfigurationError) { config.validate_backup }
+      assert_match(/databases must contain at least one database/, error.message)
+    end
+  end
+
+  def test_local_paths_still_use_production_restore_from_defaults
+    Dir.mktmpdir do |dir|
+      config_dir = File.join(dir, "config")
+      FileUtils.mkdir_p(config_dir)
+      File.write(
+        File.join(config_dir, "kamal-backup.local.yml"),
+        <<~YAML
+          paths:
+            - storage
+        YAML
+      )
+
+      config = KamalBackup::Config.new(
+        env: {},
+        cwd: dir,
+        defaults: { "LOCAL_RESTORE_SOURCE_PATHS" => "/data/storage" },
+        config_paths: [KamalBackup::Config::LOCAL_CONFIG_PATH],
+        load_project_defaults: false
+      )
+
+      assert_equal ["storage"], config.backup_paths
+      assert_equal ["/data/storage"], config.local_restore_source_paths
+    end
+  end
+
+  def test_paths_reject_hash_entries_for_now
+    Dir.mktmpdir do |dir|
+      config_dir = File.join(dir, "config")
+      FileUtils.mkdir_p(config_dir)
+      File.write(
+        File.join(config_dir, "kamal-backup.yml"),
+        <<~YAML
+          app: bad-paths
+          paths:
+            - path: /data/storage
+        YAML
+      )
+
+      error = assert_raises(KamalBackup::ConfigurationError) do
+        KamalBackup::Config.new(env: {}, cwd: dir, load_project_defaults: false)
+      end
+
+      assert_match(/paths entries must be path strings/, error.message)
     end
   end
 
@@ -290,7 +479,7 @@ class ConfigTest < Minitest::Test
     ))
 
     error = assert_raises(KamalBackup::ConfigurationError) { config.validate_local_machine_restore }
-    assert_match(/LOCAL_RESTORE_SOURCE_PATHS must contain the same number of paths as BACKUP_PATHS/, error.message)
+    assert_match(/local restore source paths must contain the same number of paths as file paths/, error.message)
   end
 
   def test_retention_args_use_restic_flags

@@ -43,11 +43,12 @@ module KamalBackup
 
       def database_filename(timestamp)
         app = config.app_name.gsub(/[^A-Za-z0-9_.-]+/, "-")
-        "databases-#{app}-#{adapter_name}-#{timestamp}.#{dump_extension}"
+        database = config.database_name.gsub(/[^A-Za-z0-9_.-]+/, "-")
+        "databases-#{app}-#{database}-#{adapter_name}-#{timestamp}.#{dump_extension}"
       end
 
       def backup_tags(timestamp)
-        ["type:database", "adapter:#{adapter_name}", "run:#{timestamp}"]
+        ["type:database", "database:#{config.database_name}", "adapter:#{adapter_name}", "run:#{timestamp}"]
       end
 
       def adapter_name

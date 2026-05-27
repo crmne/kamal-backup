@@ -27,10 +27,10 @@ This runs on your machine, so it also requires a local `restic` install on `PATH
 
 With `-d` or `-c`, `drill local` uses `config/kamal-backup.yml` for the source side:
 
-- `app_name`
-- `database_adapter`
-- `restic_repository`
-- source paths from production `backup_paths`
+- `app`
+- the first configured database adapter
+- `restic.repository`
+- source paths from production `paths`
 
 And for a normal Rails app it infers the local target side from Rails:
 
@@ -48,8 +48,8 @@ For larger apps, treat `drill local` as a convenience. The main drill should usu
 
 This is the production-side drill:
 
-- restore the database into a scratch database or scratch SQLite file
-- restore Active Storage files into a scratch path
+- restore each database into a scratch database or scratch SQLite file
+- restore configured paths into a scratch path
 - run an optional verification command
 - write the JSON result for evidence
 
@@ -82,7 +82,7 @@ bundle exec kamal-backup -d production drill production latest \
   --check "test -f /restore/db/restore.sqlite3"
 ```
 
-For PostgreSQL and MySQL, if you omit `--database` in an interactive session, `kamal-backup` asks for the scratch database name. Non-interactive runs should pass it explicitly.
+For PostgreSQL and MySQL, if you omit `--database` in an interactive session, `kamal-backup` asks for the scratch database name. Non-interactive runs should pass it explicitly. When multiple databases are configured, that value is used as a prefix and the database name is appended.
 
 ## Scheduling
 
