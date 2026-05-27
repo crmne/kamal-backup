@@ -105,6 +105,40 @@ class KamalBridgeTest < Minitest::Test
     end
   end
 
+  def test_accessory_environment_parses_exported_secret_output
+    config_output = <<~YAML
+      accessories:
+        backup:
+          env:
+            secret:
+              - RESTIC_REPOSITORY
+              - RESTIC_PASSWORD
+    YAML
+    secret_output = <<~SECRETS
+      export RESTIC_REPOSITORY=s3:https://s3.example.com/app-backups
+      export RESTIC_PASSWORD='secret with spaces'
+    SECRETS
+    Dir.mktmpdir do |dir|
+      bridge = KamalBackup::KamalBridge.new(redactor: KamalBackup::Redactor.new(env: {}), cwd: dir)
+
+      stub_command_capture(proc do |spec|
+        case spec.argv
+        when ["kamal", "config", "--version", "latest"]
+          KamalBackup::CommandResult.new(stdout: config_output, stderr: "", status: 0)
+        when ["kamal", "secrets", "print"]
+          KamalBackup::CommandResult.new(stdout: secret_output, stderr: "", status: 0)
+        else
+          raise "unexpected command: #{spec.argv.inspect}"
+        end
+      end) do
+        env = bridge.accessory_environment(accessory_name: "backup")
+
+        assert_equal "s3:https://s3.example.com/app-backups", env.fetch("RESTIC_REPOSITORY")
+        assert_equal "secret with spaces", env.fetch("RESTIC_PASSWORD")
+      end
+    end
+  end
+
   def test_accessory_environment_omits_empty_resolved_secrets
     config_output = <<~YAML
       accessories:

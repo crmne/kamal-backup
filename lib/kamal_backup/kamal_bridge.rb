@@ -1,3 +1,4 @@
+require "shellwords"
 require "yaml"
 require_relative "command"
 
@@ -147,10 +148,15 @@ module KamalBackup
 
       def parse_secret_output(output)
         output.to_s.lines.each_with_object({}) do |line, secrets|
-          key, value = line.chomp.split("=", 2)
-          next if key.to_s.empty?
+          tokens = Shellwords.split(line.chomp)
+          tokens.shift if tokens.first == "export"
 
-          secrets[key] = value.to_s
+          tokens.each do |assignment|
+            key, value = assignment.split("=", 2)
+            next if key.to_s.empty? || value.nil?
+
+            secrets[key] = value.to_s
+          end
         end
       end
 
