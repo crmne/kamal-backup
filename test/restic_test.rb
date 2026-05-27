@@ -67,4 +67,40 @@ class ResticTest < Minitest::Test
       assert_equal "yaml-secret", restic_env.fetch("RESTIC_PASSWORD")
     end
   end
+
+  def test_restic_env_includes_yaml_rest_backend_credentials
+    Dir.mktmpdir do |dir|
+      config_dir = File.join(dir, "config")
+      FileUtils.mkdir_p(config_dir)
+      File.write(
+        File.join(config_dir, "kamal-backup.yml"),
+        <<~YAML
+          app: demo
+          restic:
+            repository: rest:https://backup.example.com/prod
+            password: yaml-secret
+            rest:
+              username:
+                secret: RESTIC_REST_USER
+              password:
+                secret: RESTIC_REST_PASSWORD
+        YAML
+      )
+
+      config = KamalBackup::Config.new(
+        env: {
+          "RESTIC_REST_USER" => "backup",
+          "RESTIC_REST_PASSWORD" => "rest-secret"
+        },
+        cwd: dir,
+        load_project_defaults: false
+      )
+      restic = KamalBackup::Restic.new(config, redactor: KamalBackup::Redactor.new(env: config.env))
+      restic_env = restic.send(:restic_env)
+
+      assert_equal "rest:https://backup.example.com/prod", restic_env.fetch("RESTIC_REPOSITORY")
+      assert_equal "backup", restic_env.fetch("RESTIC_REST_USERNAME")
+      assert_equal "rest-secret", restic_env.fetch("RESTIC_REST_PASSWORD")
+    end
+  end
 end

@@ -49,6 +49,7 @@ Edit that file for production. It is the main backup configuration: app name, da
 - `paths`: filesystem paths to snapshot from mounted volumes.
 - `restic.repository`: the restic repository location, such as S3-compatible storage, a restic REST server, or a filesystem path.
 - `restic.password.secret`: the Kamal secret env var that contains the restic password.
+- `restic.rest.username` and `restic.rest.password`: optional restic REST server credentials. These become `RESTIC_REST_USERNAME` and `RESTIC_REST_PASSWORD`.
 - `restic.init_if_missing`: run `restic init` when the repository has not been initialized yet.
 - `backup.schedule`: how often the accessory runs backups. `1d` means once per day.
 
@@ -129,6 +130,19 @@ If the repository URL contains credentials, declare it as a secret reference ins
 restic:
   repository:
     secret: RESTIC_REPOSITORY
+```
+{: data-title="config/kamal-backup.yml"}
+
+For a restic REST server, prefer keeping credentials out of the repository URL:
+
+```yaml
+restic:
+  repository: rest:https://backup.example.com/prod
+  rest:
+    username:
+      secret: RESTIC_REST_USER
+    password:
+      secret: RESTIC_REST_PASSWORD
 ```
 {: data-title="config/kamal-backup.yml"}
 

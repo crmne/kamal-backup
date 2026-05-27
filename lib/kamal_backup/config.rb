@@ -592,6 +592,8 @@ module KamalBackup
           end
         end
 
+        env.merge!(normalize_yaml_restic_rest(hash["rest"], raw_env: raw_env, path: path)) if hash.key?("rest")
+
         {
           "init_if_missing" => "RESTIC_INIT_IF_MISSING",
           "check_after_backup" => "RESTIC_CHECK_AFTER_BACKUP",
@@ -633,6 +635,16 @@ module KamalBackup
         else
           { "RESTIC_PASSWORD" => normalize_yaml_value(raw_value) }
         end
+      end
+
+      def normalize_yaml_restic_rest(raw_value, raw_env:, path:)
+        hash = require_mapping(raw_value, "#{path} restic.rest")
+        env = {}
+        username = hash.key?("username") ? hash["username"] : hash["user"]
+
+        env["RESTIC_REST_USERNAME"] = resolve_yaml_value(username, raw_env: raw_env, context: "#{path} restic.rest.username") if username
+        env["RESTIC_REST_PASSWORD"] = resolve_yaml_value(hash["password"], raw_env: raw_env, context: "#{path} restic.rest.password") if hash.key?("password")
+        env.compact
       end
 
       def normalize_yaml_backup(raw_value, path:)

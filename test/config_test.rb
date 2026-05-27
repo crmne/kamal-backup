@@ -279,6 +279,44 @@ class ConfigTest < Minitest::Test
     end
   end
 
+  def test_loads_restic_rest_credentials_from_yaml
+    Dir.mktmpdir do |dir|
+      config_dir = File.join(dir, "config")
+      FileUtils.mkdir_p(config_dir)
+      File.write(
+        File.join(config_dir, "kamal-backup.yml"),
+        <<~YAML
+          app: rest-app
+          databases:
+            - name: app
+              adapter: sqlite
+              path: /data/storage/production.sqlite3
+          restic:
+            repository: rest:https://backup.example.com/prod
+            password: restic-secret
+            rest:
+              username:
+                secret: RESTIC_REST_USER
+              password:
+                secret: RESTIC_REST_PASSWORD
+        YAML
+      )
+
+      config = KamalBackup::Config.new(
+        env: {
+          "RESTIC_REST_USER" => "backup",
+          "RESTIC_REST_PASSWORD" => "rest-server-secret"
+        },
+        cwd: dir,
+        load_project_defaults: false
+      )
+
+      assert_equal "rest:https://backup.example.com/prod", config.restic_repository
+      assert_equal "backup", config.value("RESTIC_REST_USERNAME")
+      assert_equal "rest-server-secret", config.value("RESTIC_REST_PASSWORD")
+    end
+  end
+
   def test_legacy_yaml_keys_are_rejected
     Dir.mktmpdir do |dir|
       config_dir = File.join(dir, "config")
