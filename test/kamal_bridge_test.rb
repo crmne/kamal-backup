@@ -95,6 +95,7 @@ class KamalBridgeTest < Minitest::Test
       assert_equal "kamal stdout\n", out.string
       assert_equal "kamal stderr\n", err.string
       assert_equal ["kamal", "accessory", "exec", "--reuse", "backup", "kamal-backup backup"], calls.first.fetch(:spec).argv
+      assert_equal false, calls.first.fetch(:kwargs).fetch(:log)
       assert_equal false, calls.first.fetch(:kwargs).fetch(:log_output)
       assert_same out, calls.first.fetch(:kwargs).fetch(:tee_stdout)
       assert_same err, calls.first.fetch(:kwargs).fetch(:tee_stderr)

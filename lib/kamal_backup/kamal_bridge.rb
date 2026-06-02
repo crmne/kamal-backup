@@ -218,6 +218,7 @@ module KamalBackup
         spec = CommandSpec.new(argv: argv)
         options = {
           redactor: @redactor,
+          log: false,
           log_output: false,
           tee_stdout: stream ? @stdout : nil,
           tee_stderr: stream ? @stderr : nil

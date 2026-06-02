@@ -77,10 +77,10 @@ class CommandTest < Minitest::Test
     assert_equal "HELLO", result.stdout
   end
 
-  def test_capture_logs_redacted_command_output_when_command_output_is_configured
+  def test_capture_logs_redacted_command_summary_when_command_output_is_configured
     io = StringIO.new
     redactor = KamalBackup::Redactor.new(env: { "PGPASSWORD" => "supersecret123" })
-    output = KamalBackup::CommandOutput.new(io: io)
+    output = KamalBackup::CommandOutput.new(io: io, env: { "USER" => "tester" })
     spec = KamalBackup::CommandSpec.new(
       argv: [RbConfig.ruby, "-e", "puts 'out'; warn ENV.fetch('PGPASSWORD')"],
       env: { "PGPASSWORD" => "supersecret123" }
@@ -94,18 +94,40 @@ class CommandTest < Minitest::Test
     assert_equal "supersecret123\n", result.stderr
     assert_includes io.string, "INFO ["
     assert_includes io.string, "Running PGPASSWORD=[REDACTED]"
-    assert_includes io.string, "DEBUG ["
-    assert_includes io.string, "Command: PGPASSWORD=[REDACTED]"
-    assert_includes io.string, "out"
+    assert_includes io.string, "as tester@localhost"
     assert_includes io.string, "[REDACTED]"
     assert_includes io.string, "Finished in"
+    refute_includes io.string, "DEBUG"
+    refute_includes io.string, "Command:"
+    refute_includes io.string, "\e["
     refute_includes io.string, "supersecret123"
+  end
+
+  def test_command_output_uses_sshkit_colors_when_enabled
+    io = StringIO.new
+    redactor = KamalBackup::Redactor.new(env: {})
+    output = KamalBackup::CommandOutput.new(io: io, env: { "SSHKIT_COLOR" => "1", "USER" => "tester" }, verbosity: :debug)
+    context = output.command_start(KamalBackup::CommandSpec.new(argv: ["restic", "check"]), redactor: redactor)
+
+    output.command_output(context, :stdout, "out\n", redactor: redactor)
+    output.command_output(context, :stderr, "err\n", redactor: redactor)
+    output.command_exit(context, 0)
+
+    assert_includes io.string, "\e[0;34;49m  INFO\e[0m"
+    assert_includes io.string, "\e[0;30;49m DEBUG\e[0m"
+    assert_includes io.string, "\e[0;32;49m"
+    assert_includes io.string, "\e[1;33;49mrestic check\e[0m"
+    assert_includes io.string, "as \e[0;34;49mtester\e[0m@\e[0;34;49mlocalhost\e[0m"
+    assert_includes io.string, "\e[0;34;49mrestic check\e[0m"
+    assert_includes io.string, "\e[0;32;49m\tout\e[0m"
+    assert_includes io.string, "\e[0;31;49m\terr\e[0m"
+    assert_includes io.string, "\e[1;32;49msuccessful\e[0m"
   end
 
   def test_capture_can_log_command_without_streaming_output
     io = StringIO.new
     redactor = KamalBackup::Redactor.new(env: {})
-    output = KamalBackup::CommandOutput.new(io: io)
+    output = KamalBackup::CommandOutput.new(io: io, verbosity: :debug)
     spec = KamalBackup::CommandSpec.new(argv: [RbConfig.ruby, "-e", "print $stdin.read"])
 
     result = KamalBackup::Command.with_output(output) do
@@ -138,7 +160,7 @@ class CommandTest < Minitest::Test
   def test_command_output_redacts_secrets_split_across_chunks
     io = StringIO.new
     redactor = KamalBackup::Redactor.new(env: { "RESTIC_PASSWORD" => "supersecret123" })
-    output = KamalBackup::CommandOutput.new(io: io)
+    output = KamalBackup::CommandOutput.new(io: io, verbosity: :debug)
     context = output.command_start(KamalBackup::CommandSpec.new(argv: ["restic", "check"]), redactor: redactor)
 
     output.command_output(context, :stderr, "prefix super", redactor: redactor)
