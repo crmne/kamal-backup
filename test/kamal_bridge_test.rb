@@ -159,6 +159,7 @@ class KamalBridgeTest < Minitest::Test
 
   def test_streamed_accessory_exec_uses_live_single_host_command
     original = KamalBackup::Command.method(:capture)
+    original_pty = KamalBackup::Command.method(:capture_pty)
     calls = []
     out = StringIO.new
     err = StringIO.new
@@ -180,18 +181,21 @@ class KamalBridgeTest < Minitest::Test
       case spec.argv
       when ["kamal", "config", "--version", "latest"]
         KamalBackup::CommandResult.new(stdout: config_output, stderr: "", status: 0)
-      when ["kamal", "accessory", "exec", "--interactive", "--reuse", "backup", "kamal-backup backup"]
-        kwargs.fetch(:tee_stdout).print("Launching interactive command via SSH from existing container...\n")
-        kwargs.fetch(:tee_stdout).print("App Host: example.com\n")
-        KamalBackup::CommandResult.new(
-          stdout: "Launching interactive command via SSH from existing container...\nApp Host: example.com\n",
-          stderr: "",
-          status: 0,
-          streamed: true
-        )
       else
         raise "unexpected command: #{spec.argv.inspect}"
       end
+    end
+
+    KamalBackup::Command.define_singleton_method(:capture_pty) do |spec, **kwargs|
+      calls << { spec: spec, kwargs: kwargs, pty: true }
+      kwargs.fetch(:tee_stdout).print("\e[0;35;49mLaunching interactive command via SSH from existing container...\e[0m\r\n")
+      kwargs.fetch(:tee_stdout).print("App Host: example.com\n")
+      KamalBackup::CommandResult.new(
+        stdout: "\e[0;35;49mLaunching interactive command via SSH from existing container...\e[0m\r\nApp Host: example.com\n",
+        stderr: "",
+        status: 0,
+        streamed: true
+      )
     end
 
     Dir.mktmpdir do |dir|
@@ -214,14 +218,13 @@ class KamalBridgeTest < Minitest::Test
       assert_includes command_log.string, "Running docker exec demo-backup kamal-backup backup on example.com"
       assert_includes command_log.string, "Finished in"
 
-      exec_call = calls.find { |call| call.fetch(:spec).argv.include?("--interactive") }
-      assert_equal false, exec_call.fetch(:kwargs).fetch(:log)
-      assert_equal false, exec_call.fetch(:kwargs).fetch(:log_output)
+      exec_call = calls.find { |call| call[:pty] }
       assert exec_call.fetch(:kwargs).fetch(:tee_stdout)
-      assert_same err, exec_call.fetch(:kwargs).fetch(:tee_stderr)
+      assert_equal ["kamal", "accessory", "exec", "--interactive", "--reuse", "backup", "kamal-backup backup"], exec_call.fetch(:spec).argv
     end
   ensure
     KamalBackup::Command.define_singleton_method(:capture) { |*args, **kwargs, &block| original.call(*args, **kwargs, &block) }
+    KamalBackup::Command.define_singleton_method(:capture_pty) { |*args, **kwargs, &block| original_pty.call(*args, **kwargs, &block) }
   end
 
   def test_accessory_environment_merges_clear_env_and_resolved_secrets

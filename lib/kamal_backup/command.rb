@@ -1,4 +1,5 @@
 require "open3"
+require "pty"
 require "securerandom"
 require "shellwords"
 require_relative "errors"
@@ -246,6 +247,39 @@ module KamalBackup
         else
           raise command_failure(spec, status.exitstatus, stdout, stderr, redactor)
         end
+      rescue Errno::ENOENT => e
+        raise command_not_found(spec, e)
+      end
+
+      def capture_pty(spec, redactor:, tee_stdout: nil)
+        output = +""
+        tee_buffer = +""
+        result = nil
+
+        PTY.spawn(spec.env, *spec.argv) do |reader, writer, pid|
+          writer.close
+
+          begin
+            loop do
+              chunk = reader.readpartial(16 * 1024)
+              output << chunk
+              tee_buffer = tee_stream(tee_stdout, redactor, tee_buffer, chunk) if tee_stdout
+            end
+          rescue EOFError, Errno::EIO
+            flush_tee_stream(tee_stdout, redactor, tee_buffer) if tee_stdout
+          ensure
+            reader.close unless reader.closed?
+          end
+
+          _, status = Process.wait2(pid)
+          result = CommandResult.new(stdout: output, stderr: "", status: status.exitstatus, streamed: !!tee_stdout)
+
+          unless status.success?
+            raise command_failure(spec, status.exitstatus, output, output, redactor)
+          end
+        end
+
+        result
       rescue Errno::ENOENT => e
         raise command_not_found(spec, e)
       end

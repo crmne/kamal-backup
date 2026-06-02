@@ -25,6 +25,34 @@ class CommandTest < Minitest::Test
     assert_equal 0, result.status
   end
 
+  def test_capture_pty_streams_redacted_output
+    out = StringIO.new
+    redactor = KamalBackup::Redactor.new(env: { "RESTIC_PASSWORD" => "supersecret123" })
+    spec = KamalBackup::CommandSpec.new(
+      argv: [RbConfig.ruby, "-e", "puts ENV.fetch('RESTIC_PASSWORD')"],
+      env: { "RESTIC_PASSWORD" => "supersecret123" }
+    )
+
+    result = KamalBackup::Command.capture_pty(spec, redactor: redactor, tee_stdout: out)
+
+    assert result.streamed
+    assert_includes result.stdout, "supersecret123"
+    assert_includes out.string, "[REDACTED]"
+    refute_includes out.string, "supersecret123"
+  end
+
+  def test_capture_pty_includes_output_on_failure
+    spec = KamalBackup::CommandSpec.new(argv: [RbConfig.ruby, "-e", "puts 'pty boom'; exit 1"])
+
+    error = assert_raises(KamalBackup::CommandError) do
+      KamalBackup::Command.capture_pty(spec, redactor: KamalBackup::Redactor.new(env: {}))
+    end
+
+    assert_equal 1, error.status
+    assert_includes error.stderr, "pty boom"
+    assert_includes error.message, "pty boom"
+  end
+
   def test_capture_raises_command_error_on_failure
     spec = KamalBackup::CommandSpec.new(argv: [RbConfig.ruby, "-e", "warn 'boom'; exit 1"])
 

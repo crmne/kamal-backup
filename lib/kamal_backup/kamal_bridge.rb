@@ -219,7 +219,7 @@ module KamalBackup
         argv
       end
 
-      def capture_kamal(argv, stream: false, log: !stream, stdout: @stdout, stderr: @stderr)
+      def capture_kamal(argv, stream: false, log: !stream, stdout: @stdout, stderr: @stderr, pty: false)
         spec = CommandSpec.new(argv: argv, env: kamal_stream_env(stream))
         options = {
           redactor: @redactor,
@@ -230,7 +230,15 @@ module KamalBackup
         }
 
         if defined?(Bundler)
-          Bundler.with_unbundled_env { Command.capture(spec, **options) }
+          Bundler.with_unbundled_env { capture_command(spec, options, pty: pty) }
+        else
+          capture_command(spec, options, pty: pty)
+        end
+      end
+
+      def capture_command(spec, options, pty:)
+        if pty
+          Command.capture_pty(spec, redactor: options.fetch(:redactor), tee_stdout: options[:tee_stdout])
         else
           Command.capture(spec, **options)
         end
@@ -249,7 +257,8 @@ module KamalBackup
           kamal_exec_argv(accessory_name, command, interactive: true),
           stream: true,
           log: false,
-          stdout: filtered_interactive_stdout
+          stdout: filtered_interactive_stdout,
+          pty: true
         )
         Command.output&.command_exit(context, result.status) if context
         result
@@ -260,7 +269,8 @@ module KamalBackup
 
       def filtered_interactive_stdout
         FilteringIO.new(@stdout) do |output|
-          output == "Launching interactive command via SSH from existing container...\n"
+          stripped = output.to_s.gsub(/\e\[[0-9;]*m/, "").delete("\r").strip
+          stripped == "Launching interactive command via SSH from existing container..."
         end
       end
 
