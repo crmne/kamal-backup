@@ -170,6 +170,10 @@ module KamalBackup
       end
 
       def local_target
+        if remote_host = @env["KAMAL_HOST"].to_s
+          return "on #{colorize(remote_host, :blue)}" unless remote_host.empty?
+        end
+
         user = @env["USER"].to_s.empty? ? @env["USERNAME"].to_s : @env["USER"].to_s
 
         if user.empty?

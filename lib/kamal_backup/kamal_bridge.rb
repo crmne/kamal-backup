@@ -270,7 +270,8 @@ module KamalBackup
       def filtered_interactive_stdout
         FilteringIO.new(@stdout) do |output|
           stripped = output.to_s.gsub(/\e\[[0-9;]*m/, "").delete("\r").strip
-          stripped == "Launching interactive command via SSH from existing container..."
+          stripped == "Launching interactive command via SSH from existing container..." ||
+            stripped.match?(/\AConnection to .+ closed\.\z/)
         end
       end
 

@@ -190,8 +190,9 @@ class KamalBridgeTest < Minitest::Test
       calls << { spec: spec, kwargs: kwargs, pty: true }
       kwargs.fetch(:tee_stdout).print("\e[0;35;49mLaunching interactive command via SSH from existing container...\e[0m\r\n")
       kwargs.fetch(:tee_stdout).print("App Host: example.com\n")
+      kwargs.fetch(:tee_stdout).print("Connection to example.com closed.\r\n")
       KamalBackup::CommandResult.new(
-        stdout: "\e[0;35;49mLaunching interactive command via SSH from existing container...\e[0m\r\nApp Host: example.com\n",
+        stdout: "\e[0;35;49mLaunching interactive command via SSH from existing container...\e[0m\r\nApp Host: example.com\nConnection to example.com closed.\r\n",
         stderr: "",
         status: 0,
         streamed: true
@@ -214,6 +215,7 @@ class KamalBridgeTest < Minitest::Test
 
       assert result.streamed
       assert_equal "Launching command from existing container...\nApp Host: example.com\n", out.string
+      refute_includes out.string, "Connection to"
       assert_empty err.string
       assert_includes command_log.string, "Running docker exec demo-backup kamal-backup backup on example.com"
       assert_includes command_log.string, "Finished in"

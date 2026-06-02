@@ -144,6 +144,20 @@ class CommandTest < Minitest::Test
     refute_includes io.string, "localhost"
   end
 
+  def test_command_output_uses_kamal_host_inside_accessory_container
+    io = StringIO.new
+    redactor = KamalBackup::Redactor.new(env: {})
+    output = KamalBackup::CommandOutput.new(io: io, env: { "KAMAL_HOST" => "floppydisco.live", "USER" => "root" })
+    spec = KamalBackup::CommandSpec.new(argv: ["restic", "snapshots"])
+
+    context = output.command_start(spec, redactor: redactor)
+    output.command_exit(context, 0)
+
+    assert_includes io.string, "Running restic snapshots on floppydisco.live"
+    refute_includes io.string, "localhost"
+    refute_includes io.string, "root@"
+  end
+
   def test_command_output_uses_sshkit_colors_when_enabled
     io = StringIO.new
     redactor = KamalBackup::Redactor.new(env: {})
