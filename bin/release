@@ -8,7 +8,6 @@ require "shellwords"
 ROOT = File.expand_path("..", __dir__)
 VERSION_FILE = File.join(ROOT, "lib/kamal_backup/version.rb")
 LOCKFILE = File.join(ROOT, "Gemfile.lock")
-DOCS_DIR = File.join(ROOT, "docs")
 
 def abort_with(message)
   warn(message)
@@ -137,8 +136,6 @@ update_version_file!(version)
 run("git", "diff", "--check")
 run("bundle", "install", stdin: File::NULL)
 ensure_lockfile_version!(version)
-run("bin/test", stdin: File::NULL)
-run("bundle", "exec", "jekyll", "build", chdir: DOCS_DIR, stdin: File::NULL)
 run("git", "add", VERSION_FILE, LOCKFILE)
 run("git", "commit", "-m", "Release #{version}")
 

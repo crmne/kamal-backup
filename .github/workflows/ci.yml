@@ -2,6 +2,8 @@ name: CI
 
 on:
   push:
+    branches:
+      - master
   pull_request:
 
 permissions:
@@ -90,7 +92,7 @@ jobs:
           fi
 
           release_ref=false
-          if [ "$GITHUB_REF" = "refs/heads/${{ github.event.repository.default_branch }}" ] || [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+          if [ "$GITHUB_REF" = "refs/heads/${{ github.event.repository.default_branch }}" ]; then
             release_ref=true
           fi
 
@@ -117,13 +119,7 @@ jobs:
         run: |
           VERSION=$(ruby -r ./lib/kamal_backup/version -e 'puts KamalBackup::VERSION')
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
-          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
-            if [[ "$GITHUB_REF_NAME" != "v$VERSION" ]]; then
-              echo "::error::Git tag $GITHUB_REF_NAME does not match KamalBackup::VERSION $VERSION"
-              exit 1
-            fi
-            echo "version_tag=true" >> "$GITHUB_OUTPUT"
-          elif [ "${{ needs.release_gate.outputs.publish_artifacts }}" = "true" ]; then
+          if [ "${{ needs.release_gate.outputs.publish_artifacts }}" = "true" ]; then
             echo "version_tag=true" >> "$GITHUB_OUTPUT"
           else
             echo "version_tag=false" >> "$GITHUB_OUTPUT"
@@ -189,16 +185,12 @@ jobs:
           '
 
       - name: Check if version needs publishing
-        if: github.event_name != 'pull_request' && (needs.release_gate.outputs.should_release == 'true' || startsWith(github.ref, 'refs/tags/v'))
+        if: github.event_name != 'pull_request' && needs.release_gate.outputs.should_release == 'true'
         id: check_version
         run: |
           set -euo pipefail
 
           VERSION=$(ruby -r ./lib/kamal_backup/version -e 'puts KamalBackup::VERSION')
-          if [[ "$GITHUB_REF" == refs/tags/v* ]] && [ "$GITHUB_REF_NAME" != "v$VERSION" ]; then
-            echo "::error::Git tag $GITHUB_REF_NAME does not match KamalBackup::VERSION $VERSION"
-            exit 1
-          fi
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
 
           GEM_NAME="kamal-backup"
@@ -241,7 +233,7 @@ jobs:
   release:
     runs-on: ubuntu-latest
     needs: [test, release_gate, image, gem]
-    if: github.event_name != 'pull_request' && (needs.release_gate.outputs.should_release == 'true' || startsWith(github.ref, 'refs/tags/v'))
+    if: github.event_name != 'pull_request' && needs.release_gate.outputs.should_release == 'true'
     permissions:
       contents: write
     steps:
@@ -260,11 +252,6 @@ jobs:
           VERSION=$(ruby -r ./lib/kamal_backup/version -e 'puts KamalBackup::VERSION')
           TAG="v${VERSION}"
           release_target="$GITHUB_SHA"
-
-          if [[ "$GITHUB_REF" == refs/tags/v* ]] && [ "$GITHUB_REF_NAME" != "$TAG" ]; then
-            echo "::error::Git tag $TAG does not match KamalBackup::VERSION $VERSION"
-            exit 1
-          fi
 
           git fetch --tags --force
 
