@@ -124,6 +124,10 @@ AWS_ACCESS_KEY_ID=...
 AWS_SECRET_ACCESS_KEY=...
 ```
 
+When `RESTIC_PASSWORD` is configured, `kamal-backup` passes it to restic through a private temporary password file for each restic subprocess. That keeps the restic repository encryption password value out of the restic command environment and command log line.
+
+Store a recoverable copy of `RESTIC_PASSWORD` outside the app repository and outside the backup bucket. Restic repositories are encrypted with that password; without it, the backup data is not recoverable.
+
 If the repository URL contains credentials, declare it as a secret reference instead:
 
 ```yaml
@@ -146,7 +150,7 @@ restic:
 ```
 {: data-title="config/kamal-backup.yml"}
 
-If you do not want the restic password value in the process environment, point restic at a mounted file instead:
+If you do not want to provide the restic password to `kamal-backup` as an env var, a mounted password file is still supported:
 
 ```yaml
 restic:
@@ -155,7 +159,7 @@ restic:
 ```
 {: data-title="config/kamal-backup.yml"}
 
-The same works for the repository string when needed:
+You can also point restic at a repository file when needed:
 
 ```yaml
 restic:

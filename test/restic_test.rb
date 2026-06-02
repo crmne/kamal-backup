@@ -1,4 +1,5 @@
 require_relative "test_helper"
+require "stringio"
 
 class ResticTest < Minitest::Test
   class FakeRestic < KamalBackup::Restic
@@ -193,6 +194,78 @@ class ResticTest < Minitest::Test
 
       assert_equal "s3:https://s3.example.com/demo", restic_env.fetch("RESTIC_REPOSITORY")
       assert_equal "yaml-secret", restic_env.fetch("RESTIC_PASSWORD")
+    end
+  end
+
+  def test_restic_password_env_is_passed_to_commands_as_temporary_password_file
+    config = KamalBackup::Config.new(env: base_env("RESTIC_PASSWORD" => "super-secret"))
+    restic = KamalBackup::Restic.new(config, redactor: KamalBackup::Redactor.new(env: config.env))
+    password_file_path = nil
+
+    restic.send(:with_restic_env) do |env|
+      refute env.key?("RESTIC_PASSWORD")
+      password_file_path = env.fetch("RESTIC_PASSWORD_FILE")
+
+      assert File.file?(password_file_path)
+      assert_equal "super-secret", File.read(password_file_path)
+      assert_equal 0o600, File.stat(password_file_path).mode & 0o777
+    end
+
+    refute File.exist?(password_file_path)
+  end
+
+  def test_existing_restic_password_file_takes_precedence_over_password_env
+    Dir.mktmpdir do |dir|
+      password_file = File.join(dir, "restic-password")
+      File.write(password_file, "file-secret")
+      config = KamalBackup::Config.new(env: base_env(
+        "RESTIC_PASSWORD" => "env-secret",
+        "RESTIC_PASSWORD_FILE" => password_file
+      ))
+      restic = KamalBackup::Restic.new(config, redactor: KamalBackup::Redactor.new(env: config.env))
+
+      restic.send(:with_restic_env) do |env|
+        refute env.key?("RESTIC_PASSWORD")
+        assert_equal password_file, env.fetch("RESTIC_PASSWORD_FILE")
+      end
+
+      assert File.exist?(password_file)
+    end
+  end
+
+  def test_restic_command_log_uses_password_file_not_password_env
+    Dir.mktmpdir do |dir|
+      bin_dir = File.join(dir, "bin")
+      FileUtils.mkdir_p(bin_dir)
+      fake_restic = File.join(bin_dir, "restic")
+      File.write(
+        fake_restic,
+        <<~SH
+          #!/bin/sh
+          test -z "$RESTIC_PASSWORD" || exit 21
+          test -n "$RESTIC_PASSWORD_FILE" || exit 22
+          test "$(cat "$RESTIC_PASSWORD_FILE")" = "super-secret" || exit 23
+          printf '[]'
+        SH
+      )
+      FileUtils.chmod("+x", fake_restic)
+
+      io = StringIO.new
+      config = KamalBackup::Config.new(env: base_env("RESTIC_PASSWORD" => "super-secret"))
+      restic = KamalBackup::Restic.new(config, redactor: KamalBackup::Redactor.new(env: config.env))
+      previous_path = ENV["PATH"]
+      ENV["PATH"] = "#{bin_dir}#{File::PATH_SEPARATOR}#{previous_path}"
+
+      KamalBackup::Command.with_output(KamalBackup::CommandOutput.new(io: io, env: { "USER" => "tester" })) do
+        restic.snapshots
+      end
+
+      assert_includes io.string, "RESTIC_PASSWORD_FILE=[REDACTED]"
+      refute_match(/RESTIC_PASSWORD=\[REDACTED\]/, io.string)
+      refute_includes io.string, "super-secret"
+      refute_includes io.string, "kamal-backup-restic-password"
+    ensure
+      ENV["PATH"] = previous_path if previous_path
     end
   end
 

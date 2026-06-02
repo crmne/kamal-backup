@@ -32,7 +32,7 @@ For a normal Rails app, the local targets come from Rails conventions:
 
 You still provide the local secrets yourself in env:
 
-- `RESTIC_PASSWORD`
+- `RESTIC_PASSWORD_FILE` or `RESTIC_PASSWORD`
 - the database password env vars declared in your local config, or `PGPASSWORD`/`MYSQL_PWD` when using env-only settings
 
 And you need the `restic` binary installed locally and available on `PATH`.

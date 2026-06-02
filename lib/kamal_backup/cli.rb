@@ -503,6 +503,7 @@ module KamalBackup
       puts deploy_snippet
       puts
       puts "The accessory runs scheduled database and file backups with backup.schedule."
+      puts "kamal-backup passes RESTIC_PASSWORD to restic through a private temporary password file."
       puts "For most Rails apps, restore local and drill local can infer the development database, Active Storage path, and tmp state directory."
       puts "Local restore and drill also require the restic binary on your machine."
       puts "Create config/kamal-backup.local.yml only if you need to override those local defaults."
