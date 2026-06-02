@@ -1,3 +1,3 @@
 module KamalBackup
-  VERSION = "0.3.0.beta19"
+  VERSION = "0.3.0.beta20"
 end
