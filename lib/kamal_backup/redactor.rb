@@ -1,6 +1,7 @@
 module KamalBackup
   class Redactor
     SECRET_KEY_PATTERN = /(pass|password|secret|token|key|credential|authorization)/i
+    SENSITIVE_KEY_PATTERN = /(?:pass|password|secret|token|key|credential|authorization)|\A(?:user|username|pguser|.*_user|.*_username)\z/i
     REDACTED = "[REDACTED]"
 
     def initialize(secret_values: [], env: ENV)
@@ -16,7 +17,7 @@ module KamalBackup
 
     def redact_value(key, value)
       return nil if value.nil?
-      return REDACTED if key.to_s.match?(SECRET_KEY_PATTERN)
+      return REDACTED if key.to_s.match?(SENSITIVE_KEY_PATTERN)
 
       redact_string(value.to_s)
     end

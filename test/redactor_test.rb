@@ -75,6 +75,20 @@ class RedactorTest < Minitest::Test
     assert_equal "[REDACTED]", redactor.redact_value("aws_secret_access_key", "visible")
   end
 
+  def test_redact_value_redacts_username_keys
+    redactor = KamalBackup::Redactor.new(env: {})
+
+    assert_equal "[REDACTED]", redactor.redact_value("RESTIC_REST_USERNAME", "backup")
+    assert_equal "[REDACTED]", redactor.redact_value("RESTIC_REST_USER", "backup")
+    assert_equal "[REDACTED]", redactor.redact_value("PGUSER", "postgres")
+  end
+
+  def test_username_values_are_not_global_secret_values
+    redactor = KamalBackup::Redactor.new(env: { "RESTIC_REST_USERNAME" => "backup" })
+
+    assert_equal "backup completed", redactor.redact_string("backup completed")
+  end
+
   def test_redact_value_passes_through_non_secret_keys
     redactor = KamalBackup::Redactor.new(env: {})
 

@@ -5,15 +5,22 @@ class CommandTest < Minitest::Test
   def test_command_spec_redacts_display
     spec = KamalBackup::CommandSpec.new(
       argv: ["pg_dump", "postgres://app:secret@db/app"],
-      env: { "PGPASSWORD" => "secret" }
+      env: {
+        "PGPASSWORD" => "secret",
+        "RESTIC_REST_USERNAME" => "backup",
+        "RESTIC_CHECK_AFTER_BACKUP" => "true"
+      }
     )
     redactor = KamalBackup::Redactor.new(env: { "PGPASSWORD" => "secret" })
 
     display = spec.display(redactor)
 
+    assert_includes display, "RESTIC_CHECK_AFTER_BACKUP=true"
     assert_includes display, "PGPASSWORD=[REDACTED]"
+    assert_includes display, "RESTIC_REST_USERNAME=[REDACTED]"
     assert_includes display, "postgres://[REDACTED]@db/app"
     refute_includes display, "secret"
+    refute_includes display, "backup"
   end
 
   def test_capture_returns_stdout
