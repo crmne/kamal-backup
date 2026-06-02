@@ -283,7 +283,11 @@ module KamalBackup
           normalized_hosts(fetch(accessory_config, :hosts))
         end
 
-        hosts.first if hosts.size == 1
+        return hosts.first if hosts.size == 1
+        return if hosts.any?
+
+        all_hosts = normalized_hosts(fetch(config, :hosts))
+        all_hosts.first if all_hosts.size == 1
       end
 
       def normalized_hosts(value)
@@ -299,7 +303,18 @@ module KamalBackup
 
       def default_accessory_service_name(accessory_name)
         service = fetch(config, :service).to_s
+        service = service_from_rendered_config if service.empty?
         "#{service}-#{accessory_name}" unless service.empty?
+      end
+
+      def service_from_rendered_config
+        service_with_version = fetch(config, :service_with_version).to_s
+        version = fetch(config, :version).to_s
+        suffix = "-#{version}"
+
+        if !service_with_version.empty? && !version.empty? && service_with_version.end_with?(suffix)
+          service_with_version.delete_suffix(suffix)
+        end
       end
 
       class FilteringIO

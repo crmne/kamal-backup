@@ -164,11 +164,14 @@ class KamalBridgeTest < Minitest::Test
     err = StringIO.new
     command_log = StringIO.new
     config_output = <<~YAML
-      service: demo
+      hosts:
+        - example.com
+      version: latest
+      service_with_version: demo-latest
       accessories:
         backup:
           image: ghcr.io/crmne/kamal-backup:latest
-          host: example.com
+          role: web
     YAML
 
     KamalBackup::Command.define_singleton_method(:capture) do |spec, **kwargs|
