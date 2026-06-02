@@ -148,7 +148,7 @@ Each backup run creates:
 - one restic stdin snapshot for each configured database;
 - one `type:files` restic snapshot for the configured paths.
 
-Database dump snapshots are tagged with `kamal-backup`, `app:<name>`, `type:database`, `database:<name>`, `adapter:<adapter>`, and `run:<timestamp>`. File snapshots use `type:files`, the same run tag, and informational `path:<label>` tags for the configured paths.
+Database dump snapshots are tagged with `kamal-backup`, `app:<name>`, `type:database`, `database:<name>`, and `adapter:<adapter>`. File snapshots use `type:files` plus informational `path:<label>` tags for the configured paths. Restic stores the snapshot time separately.
 
 The next useful step is a restore drill:
 

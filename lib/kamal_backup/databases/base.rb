@@ -24,11 +24,11 @@ module KamalBackup
         @redactor = redactor
       end
 
-      def backup(restic, timestamp)
+      def backup(restic)
         restic.backup_stream(
           dump_command,
-          filename: database_filename(timestamp),
-          tags: backup_tags(timestamp)
+          filename: database_filename,
+          tags: backup_tags
         )
       end
 
@@ -41,14 +41,14 @@ module KamalBackup
         restic.pipe_dump_to_command(snapshot, filename, scratch_restore_command(target))
       end
 
-      def database_filename(timestamp)
+      def database_filename
         app = config.app_name.gsub(/[^A-Za-z0-9_.-]+/, "-")
         database = config.database_name.gsub(/[^A-Za-z0-9_.-]+/, "-")
-        "databases-#{app}-#{database}-#{adapter_name}-#{timestamp}.#{dump_extension}"
+        "databases/#{app}/#{database}/#{adapter_name}.#{dump_extension}"
       end
 
-      def backup_tags(timestamp)
-        ["type:database", "database:#{config.database_name}", "adapter:#{adapter_name}", "run:#{timestamp}"]
+      def backup_tags
+        ["type:database", "database:#{config.database_name}", "adapter:#{adapter_name}"]
       end
 
       def adapter_name

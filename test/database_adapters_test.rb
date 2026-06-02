@@ -31,6 +31,18 @@ class DatabaseAdaptersTest < Minitest::Test
     )
   end
 
+  def test_database_backup_uses_stable_filename_and_tags
+    config = KamalBackup::Config.new(env: base_env(
+      "APP_NAME" => "chatwithwork",
+      "DATABASE_ADAPTER" => "postgres",
+      "DATABASE_URL" => "postgres://app:secret@db/app"
+    ))
+    adapter = KamalBackup::Databases::Postgres.new(config, redactor: redactor)
+
+    assert_equal "databases/chatwithwork/app/postgres.pgdump", adapter.database_filename
+    assert_equal ["type:database", "database:app", "adapter:postgres"], adapter.backup_tags
+  end
+
   def test_postgres_current_restore_uses_current_database_url
     config = KamalBackup::Config.new(env: base_env(
       "DATABASE_ADAPTER" => "postgres",

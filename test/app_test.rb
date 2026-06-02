@@ -85,8 +85,8 @@ class AppTest < Minitest::Test
       @adapter_name
     end
 
-    def backup(restic, timestamp)
-      @backup_calls << { restic: restic, timestamp: timestamp }
+    def backup(restic)
+      @backup_calls << { restic: restic }
     end
 
     def restore_to_current(restic, snapshot, filename)
@@ -150,8 +150,7 @@ class AppTest < Minitest::Test
       assert_equal 1, database.backup_calls.size
       assert_equal 1, restic.backup_path_calls.size
       assert_equal [first_path, second_path], restic.backup_path_calls.first.fetch(:paths)
-      assert_includes restic.backup_path_calls.first.fetch(:tags), "type:files"
-      assert restic.backup_path_calls.first.fetch(:tags).any? { |tag| tag.start_with?("run:") }
+      assert_equal ["type:files"], restic.backup_path_calls.first.fetch(:tags)
       assert_equal 1, restic.forget_calls
     end
   end

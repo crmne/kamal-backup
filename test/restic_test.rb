@@ -36,15 +36,27 @@ class ResticTest < Minitest::Test
     assert_equal ["db"], snapshots.map { |snapshot| snapshot["short_id"] }
   end
 
-  def test_backup_paths_adds_each_path_label_as_a_tag
+  def test_backup_paths_adds_each_path_label_as_a_tag_and_uses_stable_host
     config = KamalBackup::Config.new(env: base_env("APP_NAME" => "demo"))
     restic = FakeRestic.new(config, "[]")
 
-    restic.backup_paths(["/data/storage", "/data/uploads"], tags: ["type:files", "run:20260422T120000Z"])
+    restic.backup_paths(["/data/storage", "/data/uploads"], tags: ["type:files"])
 
+    assert_equal ["backup", "--host", "demo-backup", "/data/storage", "/data/uploads"], restic.last_args.first(5)
     assert_includes restic.last_args, "--tag"
     assert_includes restic.last_args, "path:data-storage"
     assert_includes restic.last_args, "path:data-uploads"
+  end
+
+  def test_database_file_finds_stable_and_legacy_dump_paths
+    config = KamalBackup::Config.new(env: base_env("APP_NAME" => "demo"))
+    json = [
+      { "type" => "file", "path" => "/databases/demo/app/postgres.pgdump" },
+      { "type" => "file", "path" => "/databases-demo-app-postgres-20260422T120000Z.pgdump" }
+    ].map(&:to_json).join("\n")
+    restic = FakeRestic.new(config, json)
+
+    assert_equal "/databases/demo/app/postgres.pgdump", restic.database_file("snapshot", "postgres", database_name: "app")
   end
 
   def test_forget_after_success_groups_database_snapshots_by_host

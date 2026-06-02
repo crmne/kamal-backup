@@ -13,7 +13,7 @@ module KamalBackup
         "sqlite3"
       end
 
-      def backup(restic, timestamp)
+      def backup(restic)
         source = sqlite_source
         Tempfile.create(["kamal-backup-", ".sqlite3"]) do |tempfile|
           tempfile.close
@@ -23,8 +23,8 @@ module KamalBackup
           )
           restic.backup_file(
             tempfile.path,
-            filename: database_filename(timestamp),
-            tags: backup_tags(timestamp)
+            filename: database_filename,
+            tags: backup_tags
           )
         end
       end

@@ -31,10 +31,9 @@ module KamalBackup
       config.validate_backup
       require_restic!
 
-      timestamp = current_timestamp
       restic.ensure_repository
-      databases.each { |database| database.backup(restic, timestamp) }
-      restic.backup_paths(config.backup_paths, tags: ["type:files", "run:#{timestamp}"])
+      databases.each { |database| database.backup(restic) }
+      restic.backup_paths(config.backup_paths, tags: ["type:files"])
 
       if config.forget_after_backup?
         restic.forget_after_success
@@ -135,10 +134,6 @@ module KamalBackup
     end
 
     private
-      def current_timestamp
-        Time.now.utc.strftime("%Y%m%dT%H%M%SZ")
-      end
-
       def build_restore_result(scope, snapshot)
         started_at = Time.now.utc
         result = Schema.record(

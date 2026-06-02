@@ -17,7 +17,7 @@ The goal is simple: scheduled backups for Rails apps deployed with Kamal that ar
 Restic is the right backend here because it provides:
 
 - encrypted repositories by default;
-- snapshots with tags, so one backup run can tie the database and Active Storage files together;
+- snapshots with stable tags, so database and file backups can be selected independently;
 - deduplication across repeated backup runs;
 - retention and prune commands;
 - repository health checks;
@@ -40,8 +40,8 @@ When a backup run starts, `kamal-backup` does five things:
 1. It validates the app name, restic repository, database settings, and file paths.
 2. It creates database backups using the database-native export tool:
    PostgreSQL uses `pg_dump`, MySQL/MariaDB use `mariadb-dump` or `mysqldump`, and SQLite uses `sqlite3 .backup`.
-3. It streams each database backup into restic and tags it with `type:database`, `database:<name>`, `adapter:<adapter>`, and `run:<timestamp>`.
-4. It runs one `restic backup` for the configured paths and tags that snapshot with `type:files` and the same `run:<timestamp>`.
+3. It streams each database backup into restic and tags it with `type:database`, `database:<name>`, and `adapter:<adapter>`.
+4. It runs one `restic backup` for the configured paths and tags that snapshot with `type:files`.
 5. It optionally prunes old snapshots and runs the same repository verification as `kamal-backup check`, depending on configuration.
 
 The result is one database snapshot per database and one file snapshot per run.
@@ -77,14 +77,12 @@ Database snapshots are tagged with:
 - `type:database`
 - `database:<name>`
 - `adapter:<adapter>`
-- `run:<timestamp>`
 
 Active Storage file snapshots are tagged with:
 
 - `kamal-backup`
 - `app:<name>`
 - `type:files`
-- `run:<timestamp>`
 - `path:<label>` for each configured Active Storage path
 
-The shared `run:<timestamp>` tag lets you correlate the database and file backups from the same run.
+Restic records each snapshot's time, so backup timestamps come from the repository metadata rather than a per-run tag.

@@ -28,7 +28,7 @@ module KamalBackup
 
     def backup_stream(command, filename:, tags:)
       restic_command = CommandSpec.new(
-        argv: ["restic", "backup", "--stdin", "--stdin-filename", filename] + tag_args(common_tags + tags),
+        argv: ["restic", "backup"] + host_args + ["--stdin", "--stdin-filename", filename] + tag_args(common_tags + tags),
         env: restic_env
       )
       log("backing up stream as #{filename}")
@@ -37,7 +37,7 @@ module KamalBackup
 
     def backup_file(path, filename:, tags:)
       command = CommandSpec.new(
-        argv: ["restic", "backup", "--stdin", "--stdin-filename", filename] + tag_args(common_tags + tags),
+        argv: ["restic", "backup"] + host_args + ["--stdin", "--stdin-filename", filename] + tag_args(common_tags + tags),
         env: restic_env
       )
       log("backing up file content as #{filename}")
@@ -66,7 +66,7 @@ module KamalBackup
       if paths.any?
         path_tags = paths.map { |path| "path:#{config.backup_path_label(path)}" }
         log("backing up #{paths.size} file path(s): #{paths.join(", ")}")
-        run(["backup"] + paths + tag_args(common_tags + tags + path_tags))
+        run(["backup"] + host_args + paths + tag_args(common_tags + tags + path_tags))
       end
     end
 
@@ -128,13 +128,15 @@ module KamalBackup
       legacy_prefix = "databases/#{config.app_name}/#{adapter}/"
       app = config.app_name.gsub(/[^A-Za-z0-9_.-]+/, "-")
       database = database_name.to_s.gsub(/[^A-Za-z0-9_.-]+/, "-")
+      stable_prefix = database.empty? ? nil : "databases/#{app}/#{database}/#{adapter}."
       flat_prefix = "databases-#{app}-#{adapter}-"
       named_flat_prefix = database.empty? ? nil : "databases-#{app}-#{database}-#{adapter}-"
       ls_json(snapshot).find do |entry|
         next false unless entry["type"] == "file"
 
         normalized = entry["path"].to_s.sub(%r{\A/+}, "")
-        normalized.start_with?(legacy_prefix) ||
+        (stable_prefix && normalized.start_with?(stable_prefix)) ||
+          normalized.start_with?(legacy_prefix) ||
           File.basename(normalized).start_with?(flat_prefix) ||
           (named_flat_prefix && File.basename(normalized).start_with?(named_flat_prefix))
       end&.fetch("path")
@@ -211,6 +213,19 @@ module KamalBackup
 
       def tag_args(tags)
         tags.compact.each_with_object([]) { |tag, args| args.concat(["--tag", tag]) }
+      end
+
+      def host_args
+        ["--host", restic_host]
+      end
+
+      def restic_host
+        normalize_restic_host([config.app_name, config.accessory_name || "backup"].compact.join("-"))
+      end
+
+      def normalize_restic_host(value)
+        normalized = value.to_s.gsub(/[^A-Za-z0-9_.-]+/, "-").gsub(/\A-+|-+\z/, "")
+        normalized.empty? ? "kamal-backup" : normalized
       end
 
       def filter_tag_args(tags)
