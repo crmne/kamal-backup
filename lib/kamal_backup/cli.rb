@@ -429,6 +429,10 @@ module KamalBackup
       output ||= CommandOutput.new(io: $stderr, env: env)
       output.error("(#{e.class}): #{e.message}", redactor: Redactor.new(env: env))
       exit(1)
+    rescue StandardError => e
+      output ||= CommandOutput.new(io: $stderr, env: env)
+      output.error("(#{e.class}): #{e.message}", redactor: Redactor.new(env: env))
+      exit(1)
     rescue Interrupt
       output ||= CommandOutput.new(io: $stderr, env: env)
       output.error("(Interrupt): interrupted", redactor: Redactor.new(env: env))

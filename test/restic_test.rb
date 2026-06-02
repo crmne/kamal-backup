@@ -48,6 +48,33 @@ class ResticTest < Minitest::Test
     assert_includes restic.last_args, "path:data-uploads"
   end
 
+  def test_backup_file_reports_restic_stderr_when_stdin_pipe_closes
+    Dir.mktmpdir do |dir|
+      bin_dir = File.join(dir, "bin")
+      FileUtils.mkdir_p(bin_dir)
+      fake_restic = File.join(bin_dir, "restic")
+      File.write(fake_restic, "#!/bin/sh\necho restic exploded >&2\nexit 12\n")
+      FileUtils.chmod("+x", fake_restic)
+
+      path = File.join(dir, "large.sqlite3")
+      File.binwrite(path, "x" * (16 * 1024 * 1024))
+      config = KamalBackup::Config.new(env: base_env("APP_NAME" => "demo"))
+      restic = KamalBackup::Restic.new(config, redactor: KamalBackup::Redactor.new(env: {}))
+      previous_path = ENV["PATH"]
+      ENV["PATH"] = "#{bin_dir}#{File::PATH_SEPARATOR}#{previous_path}"
+
+      error = assert_raises(KamalBackup::CommandError) do
+        restic.backup_file(path, filename: "databases/demo/app/sqlite.sqlite3", tags: ["type:database"])
+      end
+
+      assert_equal 12, error.status
+      assert_includes error.stderr, "restic exploded"
+      assert_includes error.message, "restic exploded"
+    ensure
+      ENV["PATH"] = previous_path if previous_path
+    end
+  end
+
   def test_database_file_finds_stable_and_legacy_dump_paths
     config = KamalBackup::Config.new(env: base_env("APP_NAME" => "demo"))
     json = [

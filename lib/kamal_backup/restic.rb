@@ -48,13 +48,20 @@ module KamalBackup
         Open3.popen3(command.env, *command.argv) do |stdin, stdout, stderr, wait_thread|
           stdout_reader = Thread.new { Command.collect_stream(stdout, command_output: output, context: context, stream: :stdout, redactor: redactor) }
           stderr_reader = Thread.new { Command.collect_stream(stderr, command_output: output, context: context, stream: :stderr, redactor: redactor) }
-          IO.copy_stream(file, stdin)
-          stdin.close
+          copy_error = nil
+          begin
+            IO.copy_stream(file, stdin)
+          rescue Errno::EPIPE => e
+            copy_error = e
+          ensure
+            stdin.close unless stdin.closed?
+          end
           out = stdout_reader.value
           err = stderr_reader.value
           status = wait_thread.value
           output&.command_exit(context, status.exitstatus)
           raise_command_error(command, status, out, err) unless status.success?
+          raise_stream_error(command, copy_error, out, err) if copy_error
 
           CommandResult.new(stdout: out, stderr: err, status: status.exitstatus)
         end
@@ -304,6 +311,15 @@ module KamalBackup
           "command failed (#{status.exitstatus}): #{command.display(redactor)}\n#{redactor.redact_string(stderr)}",
           command: command,
           status: status.exitstatus,
+          stdout: redactor.redact_string(stdout),
+          stderr: redactor.redact_string(stderr)
+        )
+      end
+
+      def raise_stream_error(command, error, stdout, stderr)
+        raise CommandError.new(
+          "failed to stream file to #{command.display(redactor)}: #{error.message}\n#{redactor.redact_string(stderr)}",
+          command: command,
           stdout: redactor.redact_string(stdout),
           stderr: redactor.redact_string(stderr)
         )

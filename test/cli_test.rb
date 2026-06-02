@@ -68,6 +68,24 @@ class CLITest < Minitest::Test
     assert_includes err, "\e[1;31;49m(KamalBackup::ConfigurationError): bad config\e[0m"
   end
 
+  def test_start_formats_unexpected_errors
+    fake = Object.new
+    def fake.backup(**)
+      raise "unexpected boom"
+    end
+
+    _, err = capture_io do
+      error = assert_raises(SystemExit) do
+        with_fake_app(fake) do
+          KamalBackup::CLI.start(["backup"], env: base_env)
+        end
+      end
+      assert_equal 1, error.status
+    end
+
+    assert_includes err, "ERROR (RuntimeError): unexpected boom"
+  end
+
   def test_version_command_prints_version
     out, _ = capture_io { KamalBackup::CLI.start(["--version"], env: base_env) }
 
