@@ -130,6 +130,7 @@ class AppTest < Minitest::Test
       db = File.join(dir, "app.sqlite3")
       first_path = File.join(dir, "storage")
       second_path = File.join(dir, "uploads")
+      state = File.join(dir, "state")
       File.write(db, "")
       FileUtils.mkdir_p(first_path)
       FileUtils.mkdir_p(second_path)
@@ -140,7 +141,8 @@ class AppTest < Minitest::Test
         env: base_env(
           "DATABASE_ADAPTER" => "sqlite",
           "SQLITE_DATABASE_PATH" => db,
-          "BACKUP_PATHS" => "#{first_path}:#{second_path}"
+          "BACKUP_PATHS" => "#{first_path}:#{second_path}",
+          "KAMAL_BACKUP_STATE_DIR" => state
         ),
         restic: restic,
         database: database
@@ -157,6 +159,87 @@ class AppTest < Minitest::Test
       assert_equal "backup_result", result.fetch(:kind)
       assert_equal "latest-database-snapshot", result.fetch(:databases).first.fetch(:snapshot)
       assert_equal "latest-files-snapshot", result.fetch(:files).fetch(:snapshot)
+      assert_equal "latest-files-snapshot", JSON.parse(File.read(app.config.last_backup_path)).fetch("files").fetch("snapshot")
+    end
+  end
+
+  def test_backup_skips_when_last_backup_is_not_due
+    Dir.mktmpdir do |dir|
+      db = File.join(dir, "app.sqlite3")
+      files = File.join(dir, "storage")
+      state = File.join(dir, "state")
+      File.write(db, "")
+      FileUtils.mkdir_p(files)
+      FileUtils.mkdir_p(state)
+      File.write(
+        File.join(state, "last_backup.json"),
+        JSON.pretty_generate(
+          status: "ok",
+          finished_at: Time.now.utc.iso8601
+        )
+      )
+      restic = FakeRestic.new
+      database = FakeDatabase.new
+
+      app = KamalBackup::App.new(
+        env: base_env(
+          "DATABASE_ADAPTER" => "sqlite",
+          "SQLITE_DATABASE_PATH" => db,
+          "BACKUP_PATHS" => files,
+          "KAMAL_BACKUP_STATE_DIR" => state,
+          "BACKUP_SCHEDULE_SECONDS" => "86400"
+        ),
+        restic: restic,
+        database: database
+      )
+
+      result = app.backup
+
+      assert_equal "skipped", result.fetch(:status)
+      assert_equal "not_due", result.fetch(:reason)
+      assert_equal "kamal-backup backup --force", result.fetch(:force_command)
+      assert_equal 0, restic.ensure_repository_calls
+      assert_equal 0, database.backup_calls.size
+      assert_equal 0, restic.backup_path_calls.size
+    end
+  end
+
+  def test_backup_force_runs_even_when_last_backup_is_not_due
+    Dir.mktmpdir do |dir|
+      db = File.join(dir, "app.sqlite3")
+      files = File.join(dir, "storage")
+      state = File.join(dir, "state")
+      File.write(db, "")
+      FileUtils.mkdir_p(files)
+      FileUtils.mkdir_p(state)
+      File.write(
+        File.join(state, "last_backup.json"),
+        JSON.pretty_generate(
+          status: "ok",
+          finished_at: Time.now.utc.iso8601
+        )
+      )
+      restic = FakeRestic.new
+      database = FakeDatabase.new
+
+      app = KamalBackup::App.new(
+        env: base_env(
+          "DATABASE_ADAPTER" => "sqlite",
+          "SQLITE_DATABASE_PATH" => db,
+          "BACKUP_PATHS" => files,
+          "KAMAL_BACKUP_STATE_DIR" => state,
+          "BACKUP_SCHEDULE_SECONDS" => "86400"
+        ),
+        restic: restic,
+        database: database
+      )
+
+      result = app.backup(force: true)
+
+      assert_equal "ok", result.fetch(:status)
+      assert_equal 1, restic.ensure_repository_calls
+      assert_equal 1, database.backup_calls.size
+      assert_equal 1, restic.backup_path_calls.size
     end
   end
 

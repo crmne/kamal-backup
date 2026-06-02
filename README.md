@@ -112,6 +112,8 @@ bundle exec kamal-backup check
 bundle exec kamal-backup evidence
 ```
 
+`backup` respects `backup.schedule` and skips when the latest backup is still current. Use `bundle exec kamal-backup backup --force` when you deliberately want an immediate snapshot.
+
 ## What you get
 
 - **Scheduled backups:** the accessory runs continuously and backs up on `backup.schedule`.

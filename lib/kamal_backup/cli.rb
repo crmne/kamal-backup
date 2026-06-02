@@ -141,6 +141,13 @@ module KamalBackup
       def print_backup_result(result)
         return unless result.is_a?(Hash)
 
+        if result[:status] == "skipped"
+          puts("No backup due. Last backup finished at #{result.fetch(:last_backup_at)}.")
+          puts("Next backup is due at #{result.fetch(:next_backup_at)}.")
+          puts("Run `#{result.fetch(:force_command)}` to force a backup now.")
+          return
+        end
+
         puts("Backup completed at #{result.fetch(:finished_at)}")
         result.fetch(:databases).each do |database|
           puts("database #{database.fetch(:database)}: #{database.fetch(:snapshot)} at #{database.fetch(:time)}")
@@ -432,12 +439,15 @@ module KamalBackup
 
     include Helpers
 
-    desc "backup", "Run one database and Active Storage backup immediately"
+    method_option :force, type: :boolean, default: false, desc: "Run a backup even if the configured schedule is not due"
+    desc "backup", "Run a due database and Active Storage backup"
     def backup
       if remote_command_mode?
-        exec_remote(["kamal-backup", "backup"])
+        argv = ["kamal-backup", "backup"]
+        argv << "--force" if options[:force]
+        exec_remote(argv)
       else
-        print_backup_result(direct_app.backup)
+        print_backup_result(direct_app.backup(force: options[:force]))
       end
     end
 

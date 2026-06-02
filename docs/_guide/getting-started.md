@@ -124,6 +124,8 @@ bundle exec kamal-backup list
 bundle exec kamal-backup evidence
 ```
 
+`backup` respects the configured schedule and tells you when no backup is due. Use `bundle exec kamal-backup backup --force` to create an immediate snapshot.
+
 With the default `config/deploy.yml`, `backup`, `list`, `check`, `evidence`, `validate`, and `version` infer the backup accessory. If you keep multiple deploy configs or destinations, pass `-c` or `-d` the same way Kamal does:
 
 ```sh

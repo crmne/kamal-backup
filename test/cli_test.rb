@@ -31,7 +31,7 @@ class CLITest < Minitest::Test
 
   def test_start_redacts_error_messages
     fake = Object.new
-    def fake.backup
+    def fake.backup(**)
       raise KamalBackup::ConfigurationError, "bad postgres://app:secret@db/app with secret"
     end
 
@@ -51,7 +51,7 @@ class CLITest < Minitest::Test
 
   def test_start_formats_errors_like_kamal_when_color_enabled
     fake = Object.new
-    def fake.backup
+    def fake.backup(**)
       raise KamalBackup::ConfigurationError, "bad config"
     end
 
@@ -336,9 +336,38 @@ class CLITest < Minitest::Test
     end
   end
 
+  def test_backup_force_with_destination_runs_forced_remote_backup
+    fake_bridge = Object.new
+    calls = []
+
+    fake_bridge.define_singleton_method(:accessory_name) { |preferred:| "backup" }
+    fake_bridge.define_singleton_method(:remote_version) do |accessory_name:|
+      calls << { accessory_name: accessory_name, command: "kamal-backup version" }
+      KamalBackup::VERSION
+    end
+    fake_bridge.define_singleton_method(:execute_on_accessory) do |accessory_name:, command:, stream: false|
+      calls << { accessory_name: accessory_name, command: command, stream: stream }
+      KamalBackup::CommandResult.new(stdout: "remote backup\n", stderr: "", status: 0)
+    end
+
+    out, _ = capture_io do
+      with_fake_bridge(fake_bridge) do
+        KamalBackup::CLI.start(["-d", "production", "backup", "--force"], env: {})
+      end
+    end
+
+    assert_equal [
+      { accessory_name: "backup", command: "kamal-backup version" },
+      { accessory_name: "backup", command: "kamal-backup backup --force", stream: true }
+    ], calls
+    assert_equal "remote backup\n", out
+  end
+
   def test_local_backup_prints_backup_summary
     fake = Object.new
-    fake.define_singleton_method(:backup) do
+    received = {}
+    fake.define_singleton_method(:backup) do |force: false|
+      received[:force] = force
       {
         kind: "backup_result",
         status: "ok",
@@ -364,15 +393,69 @@ class CLITest < Minitest::Test
       end
     end
 
+    assert_equal false, received.fetch(:force)
     assert_includes out, "Backup completed at 2026-06-02T16:00:00Z"
     assert_includes out, "database app: abc12345 at 2026-06-02T16:00:00Z"
     assert_includes out, "files: def67890 at 2026-06-02T16:00:01Z"
   end
 
+  def test_local_backup_prints_skip_summary
+    fake = Object.new
+    received = {}
+    fake.define_singleton_method(:backup) do |force: false|
+      received[:force] = force
+      {
+        kind: "backup_result",
+        status: "skipped",
+        reason: "not_due",
+        last_backup_at: "2026-06-02T15:00:00Z",
+        next_backup_at: "2026-06-03T15:00:00Z",
+        force_command: "kamal-backup backup --force",
+        finished_at: "2026-06-02T16:00:00Z"
+      }
+    end
+
+    out, _ = capture_io do
+      with_fake_app(fake) do
+        KamalBackup::CLI.start(["backup"], env: base_env)
+      end
+    end
+
+    assert_equal false, received.fetch(:force)
+    assert_includes out, "No backup due. Last backup finished at 2026-06-02T15:00:00Z."
+    assert_includes out, "Next backup is due at 2026-06-03T15:00:00Z."
+    assert_includes out, "Run `kamal-backup backup --force` to force a backup now."
+  end
+
+  def test_backup_force_is_passed_to_local_app
+    fake = Object.new
+    received = {}
+    fake.define_singleton_method(:backup) do |force: false|
+      received[:force] = force
+      {
+        kind: "backup_result",
+        status: "skipped",
+        reason: "not_due",
+        last_backup_at: "2026-06-02T15:00:00Z",
+        next_backup_at: "2026-06-03T15:00:00Z",
+        force_command: "kamal-backup backup --force",
+        finished_at: "2026-06-02T16:00:00Z"
+      }
+    end
+
+    capture_io do
+      with_fake_app(fake) do
+        KamalBackup::CLI.start(["backup", "--force"], env: base_env)
+      end
+    end
+
+    assert_equal true, received.fetch(:force)
+  end
+
   def test_local_backup_configures_command_output
     fake = Object.new
     received = {}
-    fake.define_singleton_method(:backup) do
+    fake.define_singleton_method(:backup) do |**|
       received[:output] = KamalBackup::Command.output
       true
     end

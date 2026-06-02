@@ -215,6 +215,10 @@ module KamalBackup
       File.join(state_dir, "last_check.json")
     end
 
+    def last_backup_path
+      File.join(state_dir, "last_backup.json")
+    end
+
     def last_restore_drill_path
       File.join(state_dir, "last_restore_drill.json")
     end

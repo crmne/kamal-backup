@@ -29,9 +29,11 @@ module KamalBackup
       @scheduler_class = scheduler_class
     end
 
-    def backup
+    def backup(force: false)
       started_at = Time.now.utc
       config.validate_backup
+      return skipped_backup_result(started_at) unless force || backup_due?(started_at)
+
       require_restic!
 
       restic.ensure_repository
@@ -48,6 +50,7 @@ module KamalBackup
 
       backup_summary(started_at: started_at, finished_at: Time.now.utc).tap do |summary|
         validate_fresh_backup_summary!(summary, started_at: started_at)
+        write_last_backup(summary)
       end
     end
 
@@ -135,10 +138,48 @@ module KamalBackup
 
     def schedule
       config.validate_backup
-      @scheduler_class.new(config) { backup }.run
+      @scheduler_class.new(config) { backup(force: true) }.run
     end
 
     private
+      def backup_due?(now)
+        due_at = next_backup_at
+        due_at.nil? || now >= due_at
+      end
+
+      def skipped_backup_result(now)
+        {
+          kind: "backup_result",
+          status: "skipped",
+          reason: "not_due",
+          last_backup_at: last_backup_finished_at&.iso8601,
+          next_backup_at: next_backup_at&.iso8601,
+          force_command: "kamal-backup backup --force",
+          finished_at: now.iso8601
+        }
+      end
+
+      def next_backup_at
+        last_backup_finished_at + config.backup_schedule_seconds if last_backup_finished_at
+      end
+
+      def last_backup_finished_at
+        @last_backup_finished_at ||= begin
+          value = last_backup_record["finished_at"] || last_backup_record["last_backup_at"]
+          value ? Time.parse(value.to_s).utc : nil
+        rescue ArgumentError
+          nil
+        end
+      end
+
+      def last_backup_record
+        @last_backup_record ||= begin
+          JSON.parse(File.read(config.last_backup_path))
+        rescue JSON::ParserError, SystemCallError
+          {}
+        end
+      end
+
       def build_restore_result(scope, snapshot)
         started_at = Time.now.utc
         result = Schema.record(
@@ -297,6 +338,15 @@ module KamalBackup
         snapshot_time >= started_at - FRESH_BACKUP_GRACE_SECONDS
       rescue ArgumentError
         false
+      end
+
+      def write_last_backup(result)
+        FileUtils.mkdir_p(config.state_dir)
+        File.write(config.last_backup_path, JSON.pretty_generate(result))
+        @last_backup_record = result.transform_keys(&:to_s)
+        @last_backup_finished_at = Time.parse(result.fetch(:finished_at)).utc
+      rescue SystemCallError, ArgumentError
+        nil
       end
 
       def database_snapshot_tags(adapter)
