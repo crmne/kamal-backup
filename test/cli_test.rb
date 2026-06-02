@@ -238,8 +238,8 @@ class CLITest < Minitest::Test
       calls << { accessory_name: accessory_name, command: "kamal-backup version" }
       KamalBackup::VERSION
     end
-    fake_bridge.define_singleton_method(:execute_on_accessory) do |accessory_name:, command:|
-      calls << { accessory_name: accessory_name, command: command }
+    fake_bridge.define_singleton_method(:execute_on_accessory) do |accessory_name:, command:, stream: false|
+      calls << { accessory_name: accessory_name, command: command, stream: stream }
       KamalBackup::CommandResult.new(stdout: "remote restore\n", stderr: "", status: 0)
     end
 
@@ -251,7 +251,7 @@ class CLITest < Minitest::Test
 
     assert_equal [
       { accessory_name: "backup", command: "kamal-backup version" },
-      { accessory_name: "backup", command: "kamal-backup restore production latest --confirm-production-restore" }
+      { accessory_name: "backup", command: "kamal-backup restore production latest --confirm-production-restore", stream: true }
     ], calls
     assert_equal "remote restore\n", out
   end
@@ -288,8 +288,8 @@ class CLITest < Minitest::Test
       "backup"
     end
 
-    fake_bridge.define_singleton_method(:execute_on_accessory) do |accessory_name:, command:|
-      calls << { accessory_name: accessory_name, command: command }
+    fake_bridge.define_singleton_method(:execute_on_accessory) do |accessory_name:, command:, stream: false|
+      calls << { accessory_name: accessory_name, command: command, stream: stream }
       KamalBackup::CommandResult.new(stdout: "remote backup\n", stderr: "", status: 0)
     end
 
@@ -310,10 +310,58 @@ class CLITest < Minitest::Test
       assert_equal [nil], preferred_values
       assert_equal [
         { accessory_name: "backup", command: "kamal-backup version" },
-        { accessory_name: "backup", command: "kamal-backup backup" }
+        { accessory_name: "backup", command: "kamal-backup backup", stream: true }
       ], calls
       assert_equal "remote backup\n", out
     end
+  end
+
+  def test_local_backup_configures_command_output
+    fake = Object.new
+    received = {}
+    fake.define_singleton_method(:backup) do
+      received[:output] = KamalBackup::Command.output
+      true
+    end
+
+    Dir.mktmpdir do |dir|
+      Dir.chdir(dir) do
+        capture_io do
+          stub_constructor(
+            KamalBackup::App,
+            replacement: proc do |*_, **|
+              fake
+            end
+          ) do
+            KamalBackup::CLI.start(["backup"], env: base_env)
+          end
+        end
+      end
+    end
+
+    assert_instance_of KamalBackup::CommandOutput, received[:output]
+    assert_nil KamalBackup::Command.output
+  end
+
+  def test_remote_exec_streams_successful_kamal_output
+    fake_bridge = Object.new
+
+    fake_bridge.define_singleton_method(:accessory_name) { |preferred:| "backup" }
+    fake_bridge.define_singleton_method(:remote_version) { |accessory_name:| KamalBackup::VERSION }
+    fake_bridge.define_singleton_method(:execute_on_accessory) do |accessory_name:, command:, stream: false|
+      print("remote backup\n") if stream
+      $stderr.print("Running kamal command\n") if stream
+      KamalBackup::CommandResult.new(stdout: "remote backup\n", stderr: "Running kamal command\n", status: 0, streamed: stream)
+    end
+
+    out, err = capture_io do
+      with_fake_bridge(fake_bridge) do
+        KamalBackup::CLI.start(["-d", "production", "backup"], env: {})
+      end
+    end
+
+    assert_equal "remote backup\n", out
+    assert_equal "Running kamal command\n", err
   end
 
   def test_remote_commands_without_destination_use_default_deploy_config_when_present
@@ -333,8 +381,8 @@ class CLITest < Minitest::Test
         calls << { accessory_name: accessory_name, command: "kamal-backup version" }
         KamalBackup::VERSION
       end
-      fake_bridge.define_singleton_method(:execute_on_accessory) do |accessory_name:, command:|
-        calls << { accessory_name: accessory_name, command: command }
+      fake_bridge.define_singleton_method(:execute_on_accessory) do |accessory_name:, command:, stream: false|
+        calls << { accessory_name: accessory_name, command: command, stream: stream }
         KamalBackup::CommandResult.new(stdout: "remote #{argv.first}\n", stderr: "", status: 0)
       end
 
@@ -353,7 +401,7 @@ class CLITest < Minitest::Test
 
         assert_equal [
           { accessory_name: "backup", command: "kamal-backup version" },
-          { accessory_name: "backup", command: expected_command }
+          { accessory_name: "backup", command: expected_command, stream: true }
         ], calls
         assert_equal "remote #{argv.first}\n", out
       end

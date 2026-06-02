@@ -10,7 +10,7 @@ class ResticTest < Minitest::Test
       @calls = []
     end
 
-    def run(args)
+    def run(args, log_output: true)
       @last_args = args
       @calls << args
       KamalBackup::CommandResult.new(stdout: @json, stderr: "", status: 0)

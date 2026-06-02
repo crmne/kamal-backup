@@ -1,4 +1,5 @@
 require_relative "test_helper"
+require "stringio"
 
 class CommandTest < Minitest::Test
   def test_command_spec_redacts_display
@@ -74,6 +75,78 @@ class CommandTest < Minitest::Test
     result = KamalBackup::Command.capture(spec, input: "hello", redactor: KamalBackup::Redactor.new(env: {}))
 
     assert_equal "HELLO", result.stdout
+  end
+
+  def test_capture_logs_redacted_command_output_when_command_output_is_configured
+    io = StringIO.new
+    redactor = KamalBackup::Redactor.new(env: { "PGPASSWORD" => "supersecret123" })
+    output = KamalBackup::CommandOutput.new(io: io)
+    spec = KamalBackup::CommandSpec.new(
+      argv: [RbConfig.ruby, "-e", "puts 'out'; warn ENV.fetch('PGPASSWORD')"],
+      env: { "PGPASSWORD" => "supersecret123" }
+    )
+
+    result = KamalBackup::Command.with_output(output) do
+      KamalBackup::Command.capture(spec, redactor: redactor)
+    end
+
+    assert_equal "out\n", result.stdout
+    assert_equal "supersecret123\n", result.stderr
+    assert_includes io.string, "INFO ["
+    assert_includes io.string, "Running PGPASSWORD=[REDACTED]"
+    assert_includes io.string, "DEBUG ["
+    assert_includes io.string, "Command: PGPASSWORD=[REDACTED]"
+    assert_includes io.string, "out"
+    assert_includes io.string, "[REDACTED]"
+    assert_includes io.string, "Finished in"
+    refute_includes io.string, "supersecret123"
+  end
+
+  def test_capture_can_log_command_without_streaming_output
+    io = StringIO.new
+    redactor = KamalBackup::Redactor.new(env: {})
+    output = KamalBackup::CommandOutput.new(io: io)
+    spec = KamalBackup::CommandSpec.new(argv: [RbConfig.ruby, "-e", "print $stdin.read"])
+
+    result = KamalBackup::Command.with_output(output) do
+      KamalBackup::Command.capture(spec, input: "payload", redactor: redactor, log_output: false)
+    end
+
+    assert_equal "payload", result.stdout
+    assert_includes io.string, "Command:"
+    assert_includes io.string, "Finished in"
+    refute_includes io.string, "payload"
+  end
+
+  def test_capture_tees_redacted_output_without_prefixing
+    out = StringIO.new
+    err = StringIO.new
+    redactor = KamalBackup::Redactor.new(env: { "RESTIC_PASSWORD" => "supersecret123" })
+    spec = KamalBackup::CommandSpec.new(
+      argv: [RbConfig.ruby, "-e", "puts 'out'; warn 'err super' + 'secret123'"]
+    )
+
+    result = KamalBackup::Command.capture(spec, redactor: redactor, tee_stdout: out, tee_stderr: err)
+
+    assert result.streamed
+    assert_equal "out\n", result.stdout
+    assert_equal "err supersecret123\n", result.stderr
+    assert_equal "out\n", out.string
+    assert_equal "err [REDACTED]\n", err.string
+  end
+
+  def test_command_output_redacts_secrets_split_across_chunks
+    io = StringIO.new
+    redactor = KamalBackup::Redactor.new(env: { "RESTIC_PASSWORD" => "supersecret123" })
+    output = KamalBackup::CommandOutput.new(io: io)
+    context = output.command_start(KamalBackup::CommandSpec.new(argv: ["restic", "check"]), redactor: redactor)
+
+    output.command_output(context, :stderr, "prefix super", redactor: redactor)
+    output.command_output(context, :stderr, "secret123 suffix\n", redactor: redactor)
+    output.command_exit(context, 0)
+
+    refute_includes io.string, "supersecret123"
+    assert_includes io.string, "prefix [REDACTED] suffix"
   end
 
   def test_capture_redacts_secrets_in_error_message

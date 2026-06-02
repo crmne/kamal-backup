@@ -1,4 +1,5 @@
 require_relative "test_helper"
+require "stringio"
 
 class KamalBridgeTest < Minitest::Test
   def stub_command_capture(result)
@@ -61,6 +62,45 @@ class KamalBridgeTest < Minitest::Test
         ], specs.first.argv
       end
     end
+  end
+
+  def test_execute_on_accessory_can_stream_kamal_output
+    original = KamalBackup::Command.method(:capture)
+    calls = []
+    out = StringIO.new
+    err = StringIO.new
+    redactor = KamalBackup::Redactor.new(env: {})
+    output = KamalBackup::CommandOutput.new(io: StringIO.new)
+
+    KamalBackup::Command.define_singleton_method(:capture) do |spec, **kwargs|
+      calls << { spec: spec, kwargs: kwargs }
+      kwargs.fetch(:tee_stdout).print("kamal stdout\n")
+      kwargs.fetch(:tee_stderr).print("kamal stderr\n")
+      KamalBackup::CommandResult.new(stdout: "kamal stdout\n", stderr: "kamal stderr\n", status: 0, streamed: true)
+    end
+
+    Dir.mktmpdir do |dir|
+      bridge = KamalBackup::KamalBridge.new(
+        redactor: redactor,
+        stdout: out,
+        stderr: err,
+        cwd: dir
+      )
+
+      result = KamalBackup::Command.with_output(output) do
+        bridge.execute_on_accessory(accessory_name: "backup", command: "kamal-backup backup", stream: true)
+      end
+
+      assert result.streamed
+      assert_equal "kamal stdout\n", out.string
+      assert_equal "kamal stderr\n", err.string
+      assert_equal ["kamal", "accessory", "exec", "--reuse", "backup", "kamal-backup backup"], calls.first.fetch(:spec).argv
+      assert_equal false, calls.first.fetch(:kwargs).fetch(:log_output)
+      assert_same out, calls.first.fetch(:kwargs).fetch(:tee_stdout)
+      assert_same err, calls.first.fetch(:kwargs).fetch(:tee_stderr)
+    end
+  ensure
+    KamalBackup::Command.define_singleton_method(:capture) { |*args, **kwargs, &block| original.call(*args, **kwargs, &block) }
   end
 
   def test_accessory_environment_merges_clear_env_and_resolved_secrets

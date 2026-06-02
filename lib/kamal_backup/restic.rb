@@ -16,7 +16,7 @@ module KamalBackup
     end
 
     def ensure_repository
-      run(%w[snapshots --json])
+      run(%w[snapshots --json], log_output: false)
     rescue CommandError => e
       if config.restic_init_if_missing?
         log("restic repository not ready, running restic init")
@@ -43,14 +43,17 @@ module KamalBackup
       log("backing up file content as #{filename}")
 
       File.open(path, "rb") do |file|
+        output = Command.output
+        context = output&.command_start(command, redactor: redactor)
         Open3.popen3(command.env, *command.argv) do |stdin, stdout, stderr, wait_thread|
-          stdout_reader = Thread.new { stdout.read }
-          stderr_reader = Thread.new { stderr.read }
+          stdout_reader = Thread.new { Command.collect_stream(stdout, command_output: output, context: context, stream: :stdout, redactor: redactor) }
+          stderr_reader = Thread.new { Command.collect_stream(stderr, command_output: output, context: context, stream: :stderr, redactor: redactor) }
           IO.copy_stream(file, stdin)
           stdin.close
           out = stdout_reader.value
           err = stderr_reader.value
           status = wait_thread.value
+          output&.command_exit(context, status.exitstatus)
           raise_command_error(command, status, out, err) unless status.success?
 
           CommandResult.new(stdout: out, stderr: err, status: status.exitstatus)
@@ -99,7 +102,7 @@ module KamalBackup
     end
 
     def snapshots_json(tags: common_tags)
-      output = run(["snapshots", "--json"] + filter_tag_args(tags)).stdout
+      output = run(["snapshots", "--json"] + filter_tag_args(tags), log_output: false).stdout
       snapshots = JSON.parse(output)
       required_tags = tags.compact
       snapshots.select do |snapshot|
@@ -116,7 +119,7 @@ module KamalBackup
     end
 
     def ls_json(snapshot)
-      output = run(["ls", "--json", snapshot]).stdout
+      output = run(["ls", "--json", snapshot], log_output: false).stdout
       output.lines.filter_map do |line|
         JSON.parse(line)
       rescue JSON::ParserError
@@ -153,12 +156,15 @@ module KamalBackup
       FileUtils.mkdir_p(File.dirname(target_path))
       temp_path = "#{target_path}.kamal-backup-#{$$}.tmp"
 
+      output = Command.output
+      context = output&.command_start(command, redactor: redactor)
       Open3.popen3(command.env, *command.argv) do |stdin, stdout, stderr, wait_thread|
         stdin.close
-        stderr_reader = Thread.new { stderr.read }
+        stderr_reader = Thread.new { Command.collect_stream(stderr, command_output: output, context: context, stream: :stderr, redactor: redactor) }
         File.open(temp_path, "wb") { |file| IO.copy_stream(stdout, file) }
         err = stderr_reader.value
         status = wait_thread.value
+        output&.command_exit(context, status.exitstatus)
         raise_command_error(command, status, "", err) unless status.success?
       end
       File.rename(temp_path, target_path)
@@ -176,8 +182,12 @@ module KamalBackup
       run(["restore", snapshot, "--target", target])
     end
 
-    def run(args)
-      Command.capture(CommandSpec.new(argv: ["restic"] + args, env: restic_env), redactor: redactor)
+    def run(args, log_output: true)
+      Command.capture(
+        CommandSpec.new(argv: ["restic"] + args, env: restic_env),
+        redactor: redactor,
+        log_output: log_output
+      )
     end
 
     def common_tags
@@ -240,13 +250,16 @@ module KamalBackup
       end
 
       def pipe_commands(producer, consumer, producer_label:, consumer_label:)
+        output = Command.output
+        producer_context = output&.command_start(producer, redactor: redactor)
         Open3.popen3(producer.env, *producer.argv) do |producer_stdin, producer_stdout, producer_stderr, producer_wait|
           producer_stdin.close
 
+          consumer_context = output&.command_start(consumer, redactor: redactor)
           Open3.popen3(consumer.env, *consumer.argv) do |consumer_stdin, consumer_stdout, consumer_stderr, consumer_wait|
-            producer_err_reader = Thread.new { producer_stderr.read }
-            consumer_out_reader = Thread.new { consumer_stdout.read }
-            consumer_err_reader = Thread.new { consumer_stderr.read }
+            producer_err_reader = Thread.new { Command.collect_stream(producer_stderr, command_output: output, context: producer_context, stream: :stderr, redactor: redactor) }
+            consumer_out_reader = Thread.new { Command.collect_stream(consumer_stdout, command_output: output, context: consumer_context, stream: :stdout, redactor: redactor) }
+            consumer_err_reader = Thread.new { Command.collect_stream(consumer_stderr, command_output: output, context: consumer_context, stream: :stderr, redactor: redactor) }
 
             copy_error = nil
             copy_thread = Thread.new do
@@ -260,6 +273,8 @@ module KamalBackup
             copy_thread.join
             producer_status = producer_wait.value
             consumer_status = consumer_wait.value
+            output&.command_exit(producer_context, producer_status.exitstatus)
+            output&.command_exit(consumer_context, consumer_status.exitstatus)
 
             producer_err = producer_err_reader.value
             consumer_out = consumer_out_reader.value
@@ -302,7 +317,11 @@ module KamalBackup
       end
 
       def log(message)
-        $stdout.puts("[kamal-backup] #{redactor.redact_string(message)}")
+        if Command.output
+          Command.output.info(message, redactor: redactor)
+        else
+          $stdout.puts("[kamal-backup] #{redactor.redact_string(message)}")
+        end
       end
   end
 end

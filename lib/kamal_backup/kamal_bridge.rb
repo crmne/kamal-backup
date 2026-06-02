@@ -7,12 +7,14 @@ module KamalBackup
     DEFAULT_CONFIG_FILE = "config/deploy.yml"
     VERSION_LINE_PATTERN = /\A\d+(?:\.\d+)+(?:[-.][A-Za-z0-9]+)*\z/
 
-    def initialize(redactor:, config_file: nil, destination: nil, env: ENV, cwd: Dir.pwd)
+    def initialize(redactor:, config_file: nil, destination: nil, env: ENV, cwd: Dir.pwd, stdout: $stdout, stderr: $stderr)
       @redactor = redactor
       @config_file = config_file
       @destination = destination
       @env = env
       @cwd = cwd
+      @stdout = stdout
+      @stderr = stderr
     end
 
     def accessory_name(preferred: nil)
@@ -50,8 +52,8 @@ module KamalBackup
       accessory_secret_placeholders(accessory_name).merge(accessory_clear_env(accessory_name))
     end
 
-    def execute_on_accessory(accessory_name:, command:)
-      capture_kamal(kamal_exec_argv(accessory_name, command))
+    def execute_on_accessory(accessory_name:, command:, stream: false)
+      capture_kamal(kamal_exec_argv(accessory_name, command), stream: stream)
     end
 
     def remote_version(accessory_name:)
@@ -212,13 +214,19 @@ module KamalBackup
         argv
       end
 
-      def capture_kamal(argv)
+      def capture_kamal(argv, stream: false)
         spec = CommandSpec.new(argv: argv)
+        options = {
+          redactor: @redactor,
+          log_output: false,
+          tee_stdout: stream ? @stdout : nil,
+          tee_stderr: stream ? @stderr : nil
+        }
 
         if defined?(Bundler)
-          Bundler.with_unbundled_env { Command.capture(spec, redactor: @redactor) }
+          Bundler.with_unbundled_env { Command.capture(spec, **options) }
         else
-          Command.capture(spec, redactor: @redactor)
+          Command.capture(spec, **options)
         end
       end
 

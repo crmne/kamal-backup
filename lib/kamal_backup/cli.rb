@@ -20,11 +20,17 @@ module KamalBackup
       end
 
       def direct_app
-        @direct_app ||= App.new(config: Config.new(env: command_env), redactor: redactor)
+        @direct_app ||= App.new(
+          config: Config.new(env: command_env),
+          redactor: redactor
+        )
       end
 
-      def local_app
-        @local_app ||= App.new(config: local_command_config, redactor: redactor)
+      def local_restore_app
+        @local_restore_app ||= App.new(
+          config: local_command_config,
+          redactor: redactor
+        )
       end
 
       def local_preferences
@@ -65,7 +71,9 @@ module KamalBackup
           redactor: redactor,
           config_file: options[:config_file],
           destination: options[:destination],
-          env: command_env
+          env: command_env,
+          stdout: $stdout,
+          stderr: $stderr
         )
       end
 
@@ -94,9 +102,11 @@ module KamalBackup
 
         result = bridge.execute_on_accessory(
           accessory_name: accessory_name,
-          command: Shellwords.join(argv)
+          command: Shellwords.join(argv),
+          stream: true
         )
-        print(result.stdout)
+        print(result.stdout) unless result.streamed
+        $stderr.print(result.stderr) if !result.streamed && !result.stderr.empty?
         result
       end
 
@@ -276,7 +286,7 @@ module KamalBackup
       desc "local [SNAPSHOT]", "Restore the backup into the local database and Active Storage path"
       def local(snapshot = "latest")
         confirm!("Restore #{snapshot} into the local database and Active Storage path? This will overwrite local data.")
-        puts(JSON.pretty_generate(local_app.restore_to_local_machine(snapshot)))
+        puts(JSON.pretty_generate(local_restore_app.restore_to_local_machine(snapshot)))
       end
 
       method_option :"confirm-production-restore", type: :boolean, default: false, desc: "Confirm production restore without interactive prompts"
@@ -301,9 +311,9 @@ module KamalBackup
       desc "local [SNAPSHOT]", "Run a restore drill on the local machine"
       def local(snapshot = "latest")
         confirm!("Run a local restore drill for #{snapshot}? This will overwrite local data.")
-        result = local_app.drill_on_local_machine(snapshot, check_command: options[:check])
+        result = local_restore_app.drill_on_local_machine(snapshot, check_command: options[:check])
         puts(JSON.pretty_generate(result))
-        exit(1) if local_app.drill_failed?(result)
+        exit(1) if local_restore_app.drill_failed?(result)
       end
 
       method_option :database, type: :string, desc: "Scratch database name for PostgreSQL or MySQL"
@@ -389,7 +399,9 @@ module KamalBackup
 
     def self.start(argv = ARGV, env: ENV)
       self.command_env = env
-      super(normalize_global_options(argv))
+      Command.with_output(CommandOutput.new(io: $stderr)) do
+        super(normalize_global_options(argv))
+      end
     rescue Error => e
       warn("kamal-backup: #{Redactor.new(env: env).redact_string(e.message)}")
       exit(1)
