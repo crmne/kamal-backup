@@ -157,6 +157,70 @@ class KamalBridgeTest < Minitest::Test
     KamalBackup::Command.define_singleton_method(:capture) { |*args, **kwargs, &block| original.call(*args, **kwargs, &block) }
   end
 
+  def test_streamed_accessory_exec_uses_live_single_host_command
+    original = KamalBackup::Command.method(:capture)
+    calls = []
+    out = StringIO.new
+    err = StringIO.new
+    command_log = StringIO.new
+    config_output = <<~YAML
+      service: demo
+      accessories:
+        backup:
+          image: ghcr.io/crmne/kamal-backup:latest
+          host: example.com
+    YAML
+
+    KamalBackup::Command.define_singleton_method(:capture) do |spec, **kwargs|
+      calls << { spec: spec, kwargs: kwargs }
+
+      case spec.argv
+      when ["kamal", "config", "--version", "latest"]
+        KamalBackup::CommandResult.new(stdout: config_output, stderr: "", status: 0)
+      when ["kamal", "accessory", "exec", "--interactive", "--reuse", "backup", "kamal-backup backup"]
+        kwargs.fetch(:tee_stdout).print("Launching interactive command via SSH from existing container...\n")
+        kwargs.fetch(:tee_stdout).print("App Host: example.com\n")
+        KamalBackup::CommandResult.new(
+          stdout: "Launching interactive command via SSH from existing container...\nApp Host: example.com\n",
+          stderr: "",
+          status: 0,
+          streamed: true
+        )
+      else
+        raise "unexpected command: #{spec.argv.inspect}"
+      end
+    end
+
+    Dir.mktmpdir do |dir|
+      bridge = KamalBackup::KamalBridge.new(
+        redactor: KamalBackup::Redactor.new(env: {}),
+        stdout: out,
+        stderr: err,
+        cwd: dir
+      )
+
+      assert_equal "backup", bridge.accessory_name(preferred: "backup")
+
+      result = KamalBackup::Command.with_output(KamalBackup::CommandOutput.new(io: command_log)) do
+        bridge.execute_on_accessory(accessory_name: "backup", command: "kamal-backup backup", stream: true)
+      end
+
+      assert result.streamed
+      assert_equal "Launching command from existing container...\nApp Host: example.com\n", out.string
+      assert_empty err.string
+      assert_includes command_log.string, "Running docker exec demo-backup kamal-backup backup on example.com"
+      assert_includes command_log.string, "Finished in"
+
+      exec_call = calls.find { |call| call.fetch(:spec).argv.include?("--interactive") }
+      assert_equal false, exec_call.fetch(:kwargs).fetch(:log)
+      assert_equal false, exec_call.fetch(:kwargs).fetch(:log_output)
+      assert exec_call.fetch(:kwargs).fetch(:tee_stdout)
+      assert_same err, exec_call.fetch(:kwargs).fetch(:tee_stderr)
+    end
+  ensure
+    KamalBackup::Command.define_singleton_method(:capture) { |*args, **kwargs, &block| original.call(*args, **kwargs, &block) }
+  end
+
   def test_accessory_environment_merges_clear_env_and_resolved_secrets
     config_output = <<~YAML
       accessories:

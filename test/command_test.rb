@@ -103,6 +103,19 @@ class CommandTest < Minitest::Test
     refute_includes io.string, "supersecret123"
   end
 
+  def test_command_output_can_log_remote_host_target
+    io = StringIO.new
+    redactor = KamalBackup::Redactor.new(env: {})
+    output = KamalBackup::CommandOutput.new(io: io, env: { "USER" => "tester" })
+    spec = KamalBackup::CommandSpec.new(argv: ["docker", "exec", "demo-backup", "kamal-backup", "backup"], host: "example.com")
+
+    context = output.command_start(spec, redactor: redactor)
+    output.command_exit(context, 0)
+
+    assert_includes io.string, "Running docker exec demo-backup kamal-backup backup on example.com"
+    refute_includes io.string, "localhost"
+  end
+
   def test_command_output_uses_sshkit_colors_when_enabled
     io = StringIO.new
     redactor = KamalBackup::Redactor.new(env: {})

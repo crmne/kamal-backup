@@ -53,7 +53,11 @@ module KamalBackup
     end
 
     def execute_on_accessory(accessory_name:, command:, stream: false)
-      capture_kamal(kamal_exec_argv(accessory_name, command), stream: stream)
+      if stream && (target = live_accessory_target(accessory_name))
+        execute_on_accessory_live(accessory_name: accessory_name, command: command, target: target)
+      else
+        capture_kamal(kamal_exec_argv(accessory_name, command), stream: stream)
+      end
     end
 
     def remote_version(accessory_name:)
@@ -176,12 +180,13 @@ module KamalBackup
         ]
       end
 
-      def kamal_exec_argv(accessory_name, command)
+      def kamal_exec_argv(accessory_name, command, interactive: false)
         [
           *kamal_command,
           "accessory",
           "exec",
           *kamal_option_argv,
+          *(["--interactive"] if interactive),
           "--reuse",
           accessory_name,
           command
@@ -214,20 +219,101 @@ module KamalBackup
         argv
       end
 
-      def capture_kamal(argv, stream: false)
+      def capture_kamal(argv, stream: false, log: !stream, stdout: @stdout, stderr: @stderr)
         spec = CommandSpec.new(argv: argv, env: kamal_stream_env(stream))
         options = {
           redactor: @redactor,
-          log: !stream,
+          log: log,
           log_output: false,
-          tee_stdout: stream ? @stdout : nil,
-          tee_stderr: stream ? @stderr : nil
+          tee_stdout: stream ? stdout : nil,
+          tee_stderr: stream ? stderr : nil
         }
 
         if defined?(Bundler)
           Bundler.with_unbundled_env { Command.capture(spec, **options) }
         else
           Command.capture(spec, **options)
+        end
+      end
+
+      def execute_on_accessory_live(accessory_name:, command:, target:)
+        @stdout.puts("Launching command from existing container...")
+
+        spec = CommandSpec.new(
+          argv: ["docker", "exec", target.fetch(:service_name), *Shellwords.split(command)],
+          host: target.fetch(:host)
+        )
+        context = Command.output&.command_start(spec, redactor: @redactor)
+
+        result = capture_kamal(
+          kamal_exec_argv(accessory_name, command, interactive: true),
+          stream: true,
+          log: false,
+          stdout: filtered_interactive_stdout
+        )
+        Command.output&.command_exit(context, result.status) if context
+        result
+      rescue CommandError => e
+        Command.output&.command_exit(context, e.status || 1) if context
+        raise
+      end
+
+      def filtered_interactive_stdout
+        FilteringIO.new(@stdout) do |output|
+          output == "Launching interactive command via SSH from existing container...\n"
+        end
+      end
+
+      def live_accessory_target(accessory_name)
+        return unless defined?(@config)
+
+        accessory_config = accessory(accessory_name)
+        host = single_accessory_host(accessory_config)
+        service_name = fetch(accessory_config, :service) || default_accessory_service_name(accessory_name)
+
+        { host: host, service_name: service_name } if host && service_name
+      rescue ConfigurationError, KeyError, NoMethodError, TypeError
+        nil
+      end
+
+      def single_accessory_host(accessory_config)
+        hosts = if host = fetch(accessory_config, :host)
+          normalized_hosts(host)
+        else
+          normalized_hosts(fetch(accessory_config, :hosts))
+        end
+
+        hosts.first if hosts.size == 1
+      end
+
+      def normalized_hosts(value)
+        case value
+        when nil
+          []
+        when Array
+          value.map(&:to_s).reject(&:empty?)
+        else
+          [value.to_s].reject(&:empty?)
+        end
+      end
+
+      def default_accessory_service_name(accessory_name)
+        service = fetch(config, :service).to_s
+        "#{service}-#{accessory_name}" unless service.empty?
+      end
+
+      class FilteringIO
+        def initialize(io, &reject)
+          @io = io
+          @reject = reject
+        end
+
+        def print(output)
+          @io.print(output) unless @reject.call(output.to_s)
+        end
+
+        def flush
+          @io.flush if @io.respond_to?(:flush)
         end
       end
 

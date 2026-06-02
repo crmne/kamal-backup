@@ -5,10 +5,11 @@ require_relative "errors"
 
 module KamalBackup
   class CommandSpec
-    attr_reader :argv, :env
+    attr_reader :argv, :env, :host
 
-    def initialize(argv:, env: {})
+    def initialize(argv:, env: {}, host: nil)
       @argv = Array(argv).compact.map(&:to_s)
+      @host = host.to_s unless host.to_s.empty?
       @env = env.each_with_object({}) do |(key, value), result|
         next if value.nil? || value.to_s.empty?
 
@@ -85,7 +86,7 @@ module KamalBackup
       started_at = Process.clock_gettime(Process::CLOCK_MONOTONIC)
       display = spec.display(redactor)
 
-      write_message("INFO", "Running #{colorize(display, :yellow, :bold)} #{local_target}", id)
+      write_message("INFO", "Running #{colorize(display, :yellow, :bold)} #{target_for(spec)}", id)
       write_message("DEBUG", "Command: #{colorize(display, :blue)}", id)
 
       { id: id, started_at: started_at, redactor: redactor }
@@ -174,6 +175,14 @@ module KamalBackup
           "on #{colorize("localhost", :blue)}"
         else
           "as #{colorize(user, :blue)}@#{colorize("localhost", :blue)}"
+        end
+      end
+
+      def target_for(spec)
+        if spec.host
+          "on #{colorize(spec.host, :blue)}"
+        else
+          local_target
         end
       end
 
