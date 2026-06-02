@@ -45,7 +45,27 @@ class CLITest < Minitest::Test
     end
 
     refute_includes err, "secret"
+    assert_includes err, "ERROR (KamalBackup::ConfigurationError):"
     assert_includes err, "postgres://[REDACTED]@db/app"
+  end
+
+  def test_start_formats_errors_like_kamal_when_color_enabled
+    fake = Object.new
+    def fake.backup
+      raise KamalBackup::ConfigurationError, "bad config"
+    end
+
+    _, err = capture_io do
+      error = assert_raises(SystemExit) do
+        with_fake_app(fake) do
+          KamalBackup::CLI.start(["backup"], env: base_env("SSHKIT_COLOR" => "1"))
+        end
+      end
+      assert_equal 1, error.status
+    end
+
+    assert_includes err, "\e[0;31;49m ERROR\e[0m"
+    assert_includes err, "\e[1;31;49m(KamalBackup::ConfigurationError): bad config\e[0m"
   end
 
   def test_version_command_prints_version
@@ -592,6 +612,21 @@ class CLITest < Minitest::Test
     assert_includes out, "local: #{KamalBackup::VERSION}"
     assert_includes out, "remote: #{KamalBackup::VERSION}"
     assert_includes out, "status: in sync"
+  end
+
+  def test_version_with_destination_colors_status_when_enabled
+    fake_bridge = Object.new
+
+    fake_bridge.define_singleton_method(:accessory_name) { |preferred:| "backup" }
+    fake_bridge.define_singleton_method(:remote_version) { |accessory_name:| KamalBackup::VERSION }
+
+    out, _ = capture_io do
+      with_fake_bridge(fake_bridge) do
+        KamalBackup::CLI.start(["-d", "production", "version"], env: { "SSHKIT_COLOR" => "1" })
+      end
+    end
+
+    assert_includes out, "status: \e[1;32;49min sync\e[0m"
   end
 
   def test_version_without_destination_uses_default_deploy_config_when_present

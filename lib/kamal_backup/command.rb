@@ -72,6 +72,14 @@ module KamalBackup
       write_message("INFO", redactor.redact_string(message))
     end
 
+    def error(message, redactor:)
+      write_message("ERROR", colorize(redactor.redact_string(message), :red, :bold))
+    end
+
+    def decorate(value, color, mode = nil)
+      colorize(value, color, mode)
+    end
+
     def command_start(spec, redactor:)
       id = SecureRandom.hex(4)
       started_at = Process.clock_gettime(Process::CLOCK_MONOTONIC)

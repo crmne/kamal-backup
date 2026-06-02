@@ -129,11 +129,13 @@ module KamalBackup
 
       def print_remote_version_status
         status = remote_version == VERSION ? "in sync" : "out of sync"
+        status_color = status == "in sync" ? :green : :red
+        status_output = CommandOutput.new(io: $stdout, env: command_env)
 
         puts("local: #{VERSION}")
         puts("remote: #{remote_version}")
-        puts("status: #{status}")
-        puts("fix: #{accessory_reboot_command}") if status == "out of sync"
+        puts("status: #{status_output.decorate(status, status_color, :bold)}")
+        puts("fix: #{status_output.decorate(accessory_reboot_command, :yellow, :bold)}") if status == "out of sync"
       end
 
       def validate_deploy_config
@@ -399,14 +401,17 @@ module KamalBackup
 
     def self.start(argv = ARGV, env: ENV)
       self.command_env = env
-      Command.with_output(CommandOutput.new(io: $stderr)) do
+      output = CommandOutput.new(io: $stderr, env: env)
+      Command.with_output(output) do
         super(normalize_global_options(argv))
       end
     rescue Error => e
-      warn("kamal-backup: #{Redactor.new(env: env).redact_string(e.message)}")
+      output ||= CommandOutput.new(io: $stderr, env: env)
+      output.error("(#{e.class}): #{e.message}", redactor: Redactor.new(env: env))
       exit(1)
     rescue Interrupt
-      warn("kamal-backup: interrupted")
+      output ||= CommandOutput.new(io: $stderr, env: env)
+      output.error("(Interrupt): interrupted", redactor: Redactor.new(env: env))
       exit(130)
     ensure
       self.command_env = nil

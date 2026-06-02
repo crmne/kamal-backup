@@ -2,6 +2,12 @@ require_relative "test_helper"
 require "stringio"
 
 class KamalBridgeTest < Minitest::Test
+  TTYStringIO = Class.new(StringIO) do
+    def tty?
+      true
+    end
+  end
+
   def stub_command_capture(result)
     original = KamalBackup::Command.method(:capture)
     specs = []
@@ -64,6 +70,27 @@ class KamalBridgeTest < Minitest::Test
     end
   end
 
+  def test_remote_version_logs_kamal_probe_commands
+    original = KamalBackup::Command.method(:capture)
+    calls = []
+
+    KamalBackup::Command.define_singleton_method(:capture) do |spec, **kwargs|
+      calls << { spec: spec, kwargs: kwargs }
+      KamalBackup::CommandResult.new(stdout: "0.2.5\n", stderr: "", status: 0)
+    end
+
+    Dir.mktmpdir do |dir|
+      bridge = KamalBackup::KamalBridge.new(redactor: KamalBackup::Redactor.new(env: {}), cwd: dir)
+
+      assert_equal "0.2.5", bridge.remote_version(accessory_name: "backup")
+      assert_equal ["kamal", "accessory", "exec", "--reuse", "backup", "kamal-backup version"], calls.first.fetch(:spec).argv
+      assert_equal true, calls.first.fetch(:kwargs).fetch(:log)
+      assert_equal false, calls.first.fetch(:kwargs).fetch(:log_output)
+    end
+  ensure
+    KamalBackup::Command.define_singleton_method(:capture) { |*args, **kwargs, &block| original.call(*args, **kwargs, &block) }
+  end
+
   def test_execute_on_accessory_can_stream_kamal_output
     original = KamalBackup::Command.method(:capture)
     calls = []
@@ -99,6 +126,32 @@ class KamalBridgeTest < Minitest::Test
       assert_equal false, calls.first.fetch(:kwargs).fetch(:log_output)
       assert_same out, calls.first.fetch(:kwargs).fetch(:tee_stdout)
       assert_same err, calls.first.fetch(:kwargs).fetch(:tee_stderr)
+    end
+  ensure
+    KamalBackup::Command.define_singleton_method(:capture) { |*args, **kwargs, &block| original.call(*args, **kwargs, &block) }
+  end
+
+  def test_streamed_accessory_exec_forces_sshkit_color_when_output_is_tty
+    original = KamalBackup::Command.method(:capture)
+    calls = []
+
+    KamalBackup::Command.define_singleton_method(:capture) do |spec, **kwargs|
+      calls << { spec: spec, kwargs: kwargs }
+      KamalBackup::CommandResult.new(stdout: "", stderr: "", status: 0, streamed: true)
+    end
+
+    Dir.mktmpdir do |dir|
+      bridge = KamalBackup::KamalBridge.new(
+        redactor: KamalBackup::Redactor.new(env: {}),
+        stdout: TTYStringIO.new,
+        stderr: StringIO.new,
+        cwd: dir
+      )
+
+      bridge.execute_on_accessory(accessory_name: "backup", command: "kamal-backup list", stream: true)
+
+      assert_equal "1", calls.first.fetch(:spec).env.fetch("SSHKIT_COLOR")
+      assert_equal false, calls.first.fetch(:kwargs).fetch(:log)
     end
   ensure
     KamalBackup::Command.define_singleton_method(:capture) { |*args, **kwargs, &block| original.call(*args, **kwargs, &block) }

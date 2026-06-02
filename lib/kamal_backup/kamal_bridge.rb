@@ -215,10 +215,10 @@ module KamalBackup
       end
 
       def capture_kamal(argv, stream: false)
-        spec = CommandSpec.new(argv: argv)
+        spec = CommandSpec.new(argv: argv, env: kamal_stream_env(stream))
         options = {
           redactor: @redactor,
-          log: false,
+          log: !stream,
           log_output: false,
           tee_stdout: stream ? @stdout : nil,
           tee_stderr: stream ? @stderr : nil
@@ -229,6 +229,20 @@ module KamalBackup
         else
           Command.capture(spec, **options)
         end
+      end
+
+      def kamal_stream_env(stream)
+        return {} unless stream
+
+        if @env["SSHKIT_COLOR"].to_s.empty?
+          stream_color? ? { "SSHKIT_COLOR" => "1" } : {}
+        else
+          { "SSHKIT_COLOR" => @env["SSHKIT_COLOR"] }
+        end
+      end
+
+      def stream_color?
+        [@stdout, @stderr].any? { |io| io.respond_to?(:tty?) && io.tty? }
       end
 
       def parse_version_line(output)
