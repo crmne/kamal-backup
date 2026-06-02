@@ -2,15 +2,17 @@ require_relative "test_helper"
 
 class ResticTest < Minitest::Test
   class FakeRestic < KamalBackup::Restic
-    attr_reader :last_args
+    attr_reader :calls, :last_args
 
     def initialize(config, json)
       super(config, redactor: KamalBackup::Redactor.new(env: {}))
       @json = json
+      @calls = []
     end
 
     def run(args)
       @last_args = args
+      @calls << args
       KamalBackup::CommandResult.new(stdout: @json, stderr: "", status: 0)
     end
 
@@ -43,6 +45,93 @@ class ResticTest < Minitest::Test
     assert_includes restic.last_args, "--tag"
     assert_includes restic.last_args, "path:data-storage"
     assert_includes restic.last_args, "path:data-uploads"
+  end
+
+  def test_forget_after_success_groups_database_snapshots_by_host
+    config = KamalBackup::Config.new(env: base_env(
+      "APP_NAME" => "demo",
+      "DATABASE_ADAPTER" => "sqlite",
+      "SQLITE_DATABASE_PATH" => "/tmp/demo.sqlite3",
+      "BACKUP_PATHS" => "",
+      "RESTIC_KEEP_LAST" => "2"
+    ))
+    restic = FakeRestic.new(config, "[]")
+
+    restic.forget_after_success
+
+    assert_equal 1, restic.calls.size
+    args = restic.last_args
+    assert_equal ["forget", "--prune", "--group-by", "host"], args.first(4)
+    assert_includes args, "--keep-last"
+    assert_includes args, "2"
+    assert_includes args, "--tag"
+    assert_includes args, "kamal-backup,app:demo,type:database,adapter:sqlite"
+    refute_includes args, "host,tags"
+  end
+
+  def test_forget_after_success_scopes_database_and_file_retention_separately
+    config = KamalBackup::Config.new(env: base_env(
+      "APP_NAME" => "demo",
+      "DATABASE_ADAPTER" => "sqlite",
+      "SQLITE_DATABASE_PATH" => "/tmp/demo.sqlite3",
+      "BACKUP_PATHS" => "/data/storage"
+    ))
+    restic = FakeRestic.new(config, "[]")
+
+    restic.forget_after_success
+
+    tag_filters = restic.calls.filter_map do |args|
+      tag_index = args.index("--tag")
+      args[tag_index + 1] if tag_index
+    end
+    assert_equal 2, restic.calls.size
+    assert_includes tag_filters, "kamal-backup,app:demo,type:database,adapter:sqlite"
+    assert_includes tag_filters, "kamal-backup,app:demo,type:files"
+  end
+
+  def test_forget_after_success_keeps_same_adapter_databases_in_separate_retention_groups
+    Dir.mktmpdir do |dir|
+      config_dir = File.join(dir, "config")
+      FileUtils.mkdir_p(config_dir)
+      File.write(
+        File.join(config_dir, "kamal-backup.yml"),
+        <<~YAML
+          app: demo
+          databases:
+            - name: app
+              adapter: postgres
+              url: postgres://app@postgres:5432/app
+            - name: queue
+              adapter: postgres
+              url: postgres://queue@postgres:5432/queue
+          restic:
+            repository: /tmp/restic
+            password: secret
+        YAML
+      )
+      config = KamalBackup::Config.new(env: {}, cwd: dir, load_project_defaults: false)
+      restic = FakeRestic.new(config, "[]")
+
+      restic.forget_after_success
+
+      tag_filters = restic.calls.filter_map do |args|
+        tag_index = args.index("--tag")
+        args[tag_index + 1] if tag_index
+      end
+      assert_equal 2, restic.calls.size
+      assert_includes tag_filters, "kamal-backup,app:demo,type:database,database:app,adapter:postgres"
+      assert_includes tag_filters, "kamal-backup,app:demo,type:database,database:queue,adapter:postgres"
+      refute_includes tag_filters, "kamal-backup,app:demo,type:database,adapter:postgres"
+    end
+  end
+
+  def test_snapshots_uses_one_filter_that_requires_all_tags
+    config = KamalBackup::Config.new(env: base_env("APP_NAME" => "demo"))
+    restic = FakeRestic.new(config, "[]")
+
+    restic.snapshots(tags: ["kamal-backup", "app:demo"])
+
+    assert_equal ["snapshots", "--tag", "kamal-backup,app:demo"], restic.last_args
   end
 
   def test_restic_env_includes_yaml_restic_settings

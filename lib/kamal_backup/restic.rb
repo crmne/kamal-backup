@@ -75,9 +75,11 @@ module KamalBackup
     end
 
     def forget_after_success
-      args = ["forget", "--prune"] + config.retention_args + tag_args(common_tags)
-      log("running restic forget/prune with retention policy")
-      run(args)
+      retention_tag_sets.each do |tags|
+        args = ["forget", "--prune", "--group-by", "host"] + config.retention_args + filter_tag_args(tags)
+        log("running restic forget/prune with retention policy for #{retention_scope(tags)}")
+        run(args)
+      end
     end
 
     def check
@@ -93,11 +95,11 @@ module KamalBackup
     end
 
     def snapshots(tags: common_tags)
-      run(["snapshots"] + tag_args(tags))
+      run(["snapshots"] + filter_tag_args(tags))
     end
 
     def snapshots_json(tags: common_tags)
-      output = run(["snapshots", "--json"] + tag_args(tags)).stdout
+      output = run(["snapshots", "--json"] + filter_tag_args(tags)).stdout
       snapshots = JSON.parse(output)
       required_tags = tags.compact
       snapshots.select do |snapshot|
@@ -181,8 +183,39 @@ module KamalBackup
     end
 
     private
+      def retention_tag_sets
+        database_retention_tag_sets + file_retention_tag_sets
+      end
+
+      def database_retention_tag_sets
+        config.databases.group_by(&:database_adapter).flat_map do |adapter, databases|
+          if databases.one?
+            # Pre-0.3 database snapshots did not include database:<name>, so keep
+            # the single-database filter broad enough for retention to prune them.
+            [common_tags + ["type:database", "adapter:#{adapter}"]]
+          else
+            databases.map do |database|
+              common_tags + ["type:database", "database:#{database.database_name}", "adapter:#{adapter}"]
+            end
+          end
+        end
+      end
+
+      def file_retention_tag_sets
+        config.backup_paths.any? ? [common_tags + ["type:files"]] : []
+      end
+
+      def retention_scope(tags)
+        tags.reject { |tag| tag == "kamal-backup" || tag.start_with?("app:") }.join(", ")
+      end
+
       def tag_args(tags)
         tags.compact.each_with_object([]) { |tag, args| args.concat(["--tag", tag]) }
+      end
+
+      def filter_tag_args(tags)
+        tags = tags.compact
+        tags.empty? ? [] : ["--tag", tags.join(",")]
       end
 
       def restic_env
