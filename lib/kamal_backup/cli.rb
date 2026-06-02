@@ -138,6 +138,19 @@ module KamalBackup
         puts("fix: #{status_output.decorate(accessory_reboot_command, :yellow, :bold)}") if status == "out of sync"
       end
 
+      def print_backup_result(result)
+        return unless result.is_a?(Hash)
+
+        puts("Backup completed at #{result.fetch(:finished_at)}")
+        result.fetch(:databases).each do |database|
+          puts("database #{database.fetch(:database)}: #{database.fetch(:snapshot)} at #{database.fetch(:time)}")
+        end
+
+        if files = result[:files]
+          puts("files: #{files.fetch(:snapshot)} at #{files.fetch(:time)}")
+        end
+      end
+
       def validate_deploy_config
         config = Config.new(
           env: bridge.accessory_environment(accessory_name: accessory_name),
@@ -424,7 +437,7 @@ module KamalBackup
       if remote_command_mode?
         exec_remote(["kamal-backup", "backup"])
       else
-        direct_app.backup
+        print_backup_result(direct_app.backup)
       end
     end
 

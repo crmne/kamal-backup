@@ -336,6 +336,39 @@ class CLITest < Minitest::Test
     end
   end
 
+  def test_local_backup_prints_backup_summary
+    fake = Object.new
+    fake.define_singleton_method(:backup) do
+      {
+        kind: "backup_result",
+        status: "ok",
+        finished_at: "2026-06-02T16:00:00Z",
+        databases: [
+          {
+            database: "app",
+            adapter: "sqlite",
+            snapshot: "abc12345",
+            time: "2026-06-02T16:00:00Z"
+          }
+        ],
+        files: {
+          snapshot: "def67890",
+          time: "2026-06-02T16:00:01Z"
+        }
+      }
+    end
+
+    out, _ = capture_io do
+      with_fake_app(fake) do
+        KamalBackup::CLI.start(["backup"], env: base_env)
+      end
+    end
+
+    assert_includes out, "Backup completed at 2026-06-02T16:00:00Z"
+    assert_includes out, "database app: abc12345 at 2026-06-02T16:00:00Z"
+    assert_includes out, "files: def67890 at 2026-06-02T16:00:01Z"
+  end
+
   def test_local_backup_configures_command_output
     fake = Object.new
     received = {}

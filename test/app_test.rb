@@ -16,6 +16,7 @@ class AppTest < Minitest::Test
       @restore_snapshot_calls = []
       @database_snapshot = "latest-database-snapshot"
       @files_snapshot = "latest-files-snapshot"
+      @snapshot_time = nil
       @staged_files = {}
     end
 
@@ -36,15 +37,16 @@ class AppTest < Minitest::Test
       KamalBackup::CommandResult.new(stdout: "checked", stderr: "", status: 0)
     end
 
-    attr_writer :database_snapshot, :files_snapshot
+    attr_writer :database_snapshot, :files_snapshot, :snapshot_time
 
     def latest_snapshot(tags:)
       @latest_snapshot_calls << tags
+      snapshot_time = @snapshot_time || Time.now.utc.iso8601
 
       if tags.include?("type:database")
-        { "short_id" => @database_snapshot }
+        { "short_id" => @database_snapshot, "time" => snapshot_time }
       else
-        { "short_id" => @files_snapshot }
+        { "short_id" => @files_snapshot, "time" => snapshot_time }
       end
     end
 
@@ -144,7 +146,7 @@ class AppTest < Minitest::Test
         database: database
       )
 
-      app.backup
+      result = app.backup
 
       assert_equal 1, restic.ensure_repository_calls
       assert_equal 1, database.backup_calls.size
@@ -152,6 +154,35 @@ class AppTest < Minitest::Test
       assert_equal [first_path, second_path], restic.backup_path_calls.first.fetch(:paths)
       assert_equal ["type:files"], restic.backup_path_calls.first.fetch(:tags)
       assert_equal 1, restic.forget_calls
+      assert_equal "backup_result", result.fetch(:kind)
+      assert_equal "latest-database-snapshot", result.fetch(:databases).first.fetch(:snapshot)
+      assert_equal "latest-files-snapshot", result.fetch(:files).fetch(:snapshot)
+    end
+  end
+
+  def test_backup_fails_when_fresh_snapshots_are_missing
+    Dir.mktmpdir do |dir|
+      db = File.join(dir, "app.sqlite3")
+      files = File.join(dir, "storage")
+      File.write(db, "")
+      FileUtils.mkdir_p(files)
+      restic = FakeRestic.new
+      restic.snapshot_time = (Time.now.utc - 60).iso8601
+      database = FakeDatabase.new
+
+      app = KamalBackup::App.new(
+        env: base_env(
+          "DATABASE_ADAPTER" => "sqlite",
+          "SQLITE_DATABASE_PATH" => db,
+          "BACKUP_PATHS" => files
+        ),
+        restic: restic,
+        database: database
+      )
+
+      error = assert_raises(KamalBackup::ConfigurationError) { app.backup }
+
+      assert_includes error.message, "backup did not create a fresh database snapshot"
     end
   end
 

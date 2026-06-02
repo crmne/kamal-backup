@@ -16,6 +16,8 @@ require_relative "schema"
 
 module KamalBackup
   class App
+    FRESH_BACKUP_GRACE_SECONDS = 5
+
     attr_reader :config, :redactor
 
     def initialize(env: ENV, config: nil, redactor: nil, restic: nil, database: nil, evidence_class: Evidence, scheduler_class: Scheduler)
@@ -28,6 +30,7 @@ module KamalBackup
     end
 
     def backup
+      started_at = Time.now.utc
       config.validate_backup
       require_restic!
 
@@ -43,7 +46,9 @@ module KamalBackup
         restic.check
       end
 
-      true
+      backup_summary(started_at: started_at, finished_at: Time.now.utc).tap do |summary|
+        validate_fresh_backup_summary!(summary, started_at: started_at)
+      end
     end
 
     def validate(check_files: true)
@@ -239,6 +244,59 @@ module KamalBackup
         result[:database] = database_results.first
         result[:paths] = file_results.first
         result[:files] = file_results.size == 1 ? file_results.first : file_results
+      end
+
+      def backup_summary(started_at:, finished_at:)
+        {
+          kind: "backup_result",
+          status: "ok",
+          started_at: started_at.iso8601,
+          finished_at: finished_at.iso8601,
+          databases: databases.map { |adapter| backup_snapshot_summary(adapter) },
+          files: backup_file_snapshot_summary
+        }
+      end
+
+      def backup_snapshot_summary(adapter)
+        snapshot = restic.latest_snapshot(tags: database_snapshot_tags(adapter))
+        snapshot_summary(snapshot).merge(
+          database: database_config_name(adapter),
+          adapter: adapter.adapter_name
+        )
+      end
+
+      def backup_file_snapshot_summary
+        return nil if config.backup_paths.empty?
+
+        snapshot_summary(restic.latest_snapshot(tags: ["type:files"]))
+      end
+
+      def snapshot_summary(snapshot)
+        {
+          snapshot: snapshot && (snapshot["short_id"] || snapshot["id"]),
+          time: snapshot && snapshot["time"]
+        }
+      end
+
+      def validate_fresh_backup_summary!(summary, started_at:)
+        stale_databases = summary.fetch(:databases).reject { |entry| fresh_snapshot?(entry, started_at) }
+
+        unless stale_databases.empty?
+          names = stale_databases.map { |entry| entry.fetch(:database) }.join(", ")
+          raise ConfigurationError, "backup did not create a fresh database snapshot for #{names}"
+        end
+
+        files = summary[:files]
+        if files && !fresh_snapshot?(files, started_at)
+          raise ConfigurationError, "backup did not create a fresh file snapshot"
+        end
+      end
+
+      def fresh_snapshot?(entry, started_at)
+        snapshot_time = Time.parse(entry[:time].to_s)
+        snapshot_time >= started_at - FRESH_BACKUP_GRACE_SECONDS
+      rescue ArgumentError
+        false
       end
 
       def database_snapshot_tags(adapter)
