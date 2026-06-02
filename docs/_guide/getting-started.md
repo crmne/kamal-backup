@@ -90,7 +90,7 @@ accessories:
 ```
 {: data-title="config/deploy.yml"}
 
-Kamal uploads `config/kamal-backup.yml` and mounts it read-only into the accessory. Secrets still stay in Kamal secrets. When `RESTIC_PASSWORD` is configured, `kamal-backup` passes it to restic through a private temporary password file for each restic subprocess.
+Kamal uploads `config/kamal-backup.yml` and mounts it read-only into the accessory. Secrets still stay in Kamal secrets.
 
 If your SQLite database lives on the mounted storage volume, omit `:ro` from that volume so SQLite can back up the live WAL database normally.
 

@@ -1,7 +1,6 @@
 require "fileutils"
 require "json"
 require "open3"
-require "tempfile"
 require "time"
 require_relative "command"
 
@@ -28,49 +27,43 @@ module KamalBackup
     end
 
     def backup_stream(command, filename:, tags:)
-      with_restic_env do |env|
-        restic_command = CommandSpec.new(
-          argv: ["restic", "backup"] + host_args + ["--stdin", "--stdin-filename", filename] + tag_args(common_tags + tags),
-          env: env
-        )
-        log("backing up stream as #{filename}")
-        pipe_commands(command, restic_command, producer_label: "dump", consumer_label: "restic backup")
-      end
+      restic_command = CommandSpec.new(
+        argv: ["restic", "backup"] + host_args + ["--stdin", "--stdin-filename", filename] + tag_args(common_tags + tags),
+        env: restic_env
+      )
+      log("backing up stream as #{filename}")
+      pipe_commands(command, restic_command, producer_label: "dump", consumer_label: "restic backup")
     end
 
     def backup_file(path, filename:, tags:)
-      command = nil
+      command = CommandSpec.new(
+        argv: ["restic", "backup"] + host_args + ["--stdin", "--stdin-filename", filename] + tag_args(common_tags + tags),
+        env: restic_env
+      )
+      log("backing up file content as #{filename}")
 
-      with_restic_env do |env|
-        command = CommandSpec.new(
-          argv: ["restic", "backup"] + host_args + ["--stdin", "--stdin-filename", filename] + tag_args(common_tags + tags),
-          env: env
-        )
-        log("backing up file content as #{filename}")
-
-        File.open(path, "rb") do |file|
-          output = Command.output
-          context = output&.command_start(command, redactor: redactor)
-          Open3.popen3(command.env, *command.argv) do |stdin, stdout, stderr, wait_thread|
-            stdout_reader = Thread.new { Command.collect_stream(stdout, command_output: output, context: context, stream: :stdout, redactor: redactor) }
-            stderr_reader = Thread.new { Command.collect_stream(stderr, command_output: output, context: context, stream: :stderr, redactor: redactor) }
-            copy_error = nil
-            begin
-              IO.copy_stream(file, stdin)
-            rescue Errno::EPIPE => e
-              copy_error = e
-            ensure
-              stdin.close unless stdin.closed?
-            end
-            out = stdout_reader.value
-            err = stderr_reader.value
-            status = wait_thread.value
-            output&.command_exit(context, status.exitstatus)
-            raise_command_error(command, status, out, err) unless status.success?
-            raise_stream_error(command, copy_error, out, err) if copy_error
-
-            CommandResult.new(stdout: out, stderr: err, status: status.exitstatus)
+      File.open(path, "rb") do |file|
+        output = Command.output
+        context = output&.command_start(command, redactor: redactor)
+        Open3.popen3(command.env, *command.argv) do |stdin, stdout, stderr, wait_thread|
+          stdout_reader = Thread.new { Command.collect_stream(stdout, command_output: output, context: context, stream: :stdout, redactor: redactor) }
+          stderr_reader = Thread.new { Command.collect_stream(stderr, command_output: output, context: context, stream: :stderr, redactor: redactor) }
+          copy_error = nil
+          begin
+            IO.copy_stream(file, stdin)
+          rescue Errno::EPIPE => e
+            copy_error = e
+          ensure
+            stdin.close unless stdin.closed?
           end
+          out = stdout_reader.value
+          err = stderr_reader.value
+          status = wait_thread.value
+          output&.command_exit(context, status.exitstatus)
+          raise_command_error(command, status, out, err) unless status.success?
+          raise_stream_error(command, copy_error, out, err) if copy_error
+
+          CommandResult.new(stdout: out, stderr: err, status: status.exitstatus)
         end
       end
     rescue Errno::ENOENT => e
@@ -160,31 +153,26 @@ module KamalBackup
     end
 
     def pipe_dump_to_command(snapshot, filename, command)
-      with_restic_env do |env|
-        restic_command = CommandSpec.new(argv: ["restic", "dump", snapshot, filename], env: env)
-        pipe_commands(restic_command, command, producer_label: "restic dump", consumer_label: command.argv.first)
-      end
+      restic_command = CommandSpec.new(argv: ["restic", "dump", snapshot, filename], env: restic_env)
+      pipe_commands(restic_command, command, producer_label: "restic dump", consumer_label: command.argv.first)
     end
 
     def write_dump_to_path(snapshot, filename, target_path)
-      command = nil
+      command = CommandSpec.new(argv: ["restic", "dump", snapshot, filename], env: restic_env)
       target_path = File.expand_path(target_path)
       FileUtils.mkdir_p(File.dirname(target_path))
       temp_path = "#{target_path}.kamal-backup-#{$$}.tmp"
 
-      with_restic_env do |env|
-        command = CommandSpec.new(argv: ["restic", "dump", snapshot, filename], env: env)
-        output = Command.output
-        context = output&.command_start(command, redactor: redactor)
-        Open3.popen3(command.env, *command.argv) do |stdin, stdout, stderr, wait_thread|
-          stdin.close
-          stderr_reader = Thread.new { Command.collect_stream(stderr, command_output: output, context: context, stream: :stderr, redactor: redactor) }
-          File.open(temp_path, "wb") { |file| IO.copy_stream(stdout, file) }
-          err = stderr_reader.value
-          status = wait_thread.value
-          output&.command_exit(context, status.exitstatus)
-          raise_command_error(command, status, "", err) unless status.success?
-        end
+      output = Command.output
+      context = output&.command_start(command, redactor: redactor)
+      Open3.popen3(command.env, *command.argv) do |stdin, stdout, stderr, wait_thread|
+        stdin.close
+        stderr_reader = Thread.new { Command.collect_stream(stderr, command_output: output, context: context, stream: :stderr, redactor: redactor) }
+        File.open(temp_path, "wb") { |file| IO.copy_stream(stdout, file) }
+        err = stderr_reader.value
+        status = wait_thread.value
+        output&.command_exit(context, status.exitstatus)
+        raise_command_error(command, status, "", err) unless status.success?
       end
       File.rename(temp_path, target_path)
       target_path
@@ -202,13 +190,11 @@ module KamalBackup
     end
 
     def run(args, log_output: true)
-      with_restic_env do |env|
-        Command.capture(
-          CommandSpec.new(argv: ["restic"] + args, env: env),
-          redactor: redactor,
-          log_output: log_output
-        )
-      end
+      Command.capture(
+        CommandSpec.new(argv: ["restic"] + args, env: restic_env),
+        redactor: redactor,
+        log_output: log_output
+      )
     end
 
     def common_tags
@@ -268,25 +254,6 @@ module KamalBackup
         config.env.each_with_object({}) do |(key, value), env|
           env[key] = value if key.to_s.match?(RESTIC_ENV_PATTERN)
         end
-      end
-
-      def with_restic_env
-        env = restic_env
-        password_file = nil
-
-        if env["RESTIC_PASSWORD_FILE"] || env["RESTIC_PASSWORD_COMMAND"]
-          env.delete("RESTIC_PASSWORD")
-        elsif env["RESTIC_PASSWORD"]
-          password_file = Tempfile.new("kamal-backup-restic-password")
-          password_file.write(env.delete("RESTIC_PASSWORD"))
-          password_file.flush
-          File.chmod(0o600, password_file.path)
-          env["RESTIC_PASSWORD_FILE"] = password_file.path
-        end
-
-        yield env
-      ensure
-        password_file&.close!
       end
 
       def pipe_commands(producer, consumer, producer_label:, consumer_label:)
