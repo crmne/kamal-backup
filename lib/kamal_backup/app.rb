@@ -130,6 +130,12 @@ module KamalBackup
       restic.check.stdout
     end
 
+    def prune
+      config.validate_backup(check_files: false)
+      require_restic!
+      restic.prune
+    end
+
     def evidence
       config.validate_restic
       require_restic!

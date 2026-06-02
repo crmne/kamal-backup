@@ -216,4 +216,6 @@ restic:
 
 `restic.forget_after_backup` defaults to enabled unless explicitly set to a falsey value such as `false`, `0`, `no`, `n`, or `off`.
 
+You can also apply the same retention policy manually with `kamal-backup prune`. Pruning runs `restic forget --prune` for each configured database and file snapshot group, so database snapshots and file snapshots retain their own history.
+
 Environment variables can still override YAML values when you need an emergency override, but the clean setup is YAML for configuration and Kamal secrets for secrets.

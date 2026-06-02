@@ -4,7 +4,7 @@ require "json"
 class AppTest < Minitest::Test
   class FakeRestic
     attr_reader :backup_path_calls, :check_calls, :database_file_calls
-    attr_reader :ensure_repository_calls, :forget_calls, :latest_snapshot_calls, :restore_snapshot_calls
+    attr_reader :ensure_repository_calls, :forget_calls, :latest_snapshot_calls, :prune_calls, :restore_snapshot_calls
 
     def initialize
       @backup_path_calls = []
@@ -13,6 +13,7 @@ class AppTest < Minitest::Test
       @ensure_repository_calls = 0
       @forget_calls = 0
       @latest_snapshot_calls = []
+      @prune_calls = 0
       @restore_snapshot_calls = []
       @database_snapshot = "latest-database-snapshot"
       @files_snapshot = "latest-files-snapshot"
@@ -30,6 +31,11 @@ class AppTest < Minitest::Test
 
     def forget_after_success
       @forget_calls += 1
+    end
+
+    def prune
+      @prune_calls += 1
+      [KamalBackup::CommandResult.new(stdout: "pruned\n", stderr: "", status: 0)]
     end
 
     def check
@@ -316,6 +322,26 @@ class AppTest < Minitest::Test
       app.backup
 
       assert_equal 1, restic.check_calls
+    end
+  end
+
+  def test_prune_applies_retention_without_requiring_paths_to_exist
+    Dir.mktmpdir do |dir|
+      restic = FakeRestic.new
+      app = KamalBackup::App.new(
+        env: base_env(
+          "DATABASE_ADAPTER" => "sqlite",
+          "SQLITE_DATABASE_PATH" => File.join(dir, "missing.sqlite3"),
+          "BACKUP_PATHS" => File.join(dir, "missing-storage")
+        ),
+        restic: restic,
+        database: FakeDatabase.new
+      )
+
+      result = app.prune
+
+      assert_equal 1, restic.prune_calls
+      assert_equal "pruned\n", result.first.stdout
     end
   end
 

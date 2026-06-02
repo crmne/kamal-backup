@@ -158,6 +158,17 @@ module KamalBackup
         end
       end
 
+      def print_prune_result(results)
+        output = Array(results).map(&:stdout).join
+
+        if output.empty?
+          puts("Prune completed")
+        else
+          print(output)
+          puts unless output.end_with?("\n")
+        end
+      end
+
       def validate_deploy_config
         config = Config.new(
           env: bridge.accessory_environment(accessory_name: accessory_name),
@@ -470,6 +481,15 @@ module KamalBackup
         exec_remote(["kamal-backup", "check"])
       else
         puts(direct_app.check)
+      end
+    end
+
+    desc "prune", "Apply the configured restic retention policy and prune unneeded data"
+    def prune
+      if remote_command_mode?
+        exec_remote(["kamal-backup", "prune"])
+      else
+        print_prune_result(direct_app.prune)
       end
     end
 

@@ -85,7 +85,11 @@ module KamalBackup
     end
 
     def forget_after_success
-      retention_tag_sets.each do |tags|
+      prune
+    end
+
+    def prune
+      retention_tag_sets.map do |tags|
         args = ["forget", "--prune", "--group-by", "host"] + config.retention_args + filter_tag_args(tags)
         log("running restic forget/prune with retention policy for #{retention_scope(tags)}")
         run(args)

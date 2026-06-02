@@ -98,6 +98,7 @@ class CLITest < Minitest::Test
     assert_includes out, "kamal-backup help [COMMAND]"
     assert_includes out, "kamal-backup init"
     assert_includes out, "kamal-backup backup"
+    assert_includes out, "kamal-backup prune"
     assert_includes out, "kamal-backup validate"
     assert_includes out, "kamal-backup restore SUBCOMMAND ...ARGS"
     assert_includes out, "kamal-backup drill SUBCOMMAND ...ARGS"
@@ -497,6 +498,21 @@ class CLITest < Minitest::Test
     assert_nil KamalBackup::Command.output
   end
 
+  def test_local_prune_prints_restic_output
+    fake = Object.new
+    fake.define_singleton_method(:prune) do
+      [KamalBackup::CommandResult.new(stdout: "removed 2 snapshots\n", stderr: "", status: 0)]
+    end
+
+    out, _ = capture_io do
+      with_fake_app(fake) do
+        KamalBackup::CLI.start(["prune"], env: base_env)
+      end
+    end
+
+    assert_equal "removed 2 snapshots\n", out
+  end
+
   def test_remote_exec_streams_successful_kamal_output
     fake_bridge = Object.new
 
@@ -523,6 +539,7 @@ class CLITest < Minitest::Test
       ["backup"] => "kamal-backup backup",
       ["list"] => "kamal-backup list",
       ["check"] => "kamal-backup check",
+      ["prune"] => "kamal-backup prune",
       ["evidence"] => "kamal-backup evidence"
     }
 
