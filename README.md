@@ -72,6 +72,7 @@ accessories:
 ```
 
 For SQLite databases stored on the mounted storage volume, omit `:ro` from that volume.
+When the configured SQLite database file lives under a configured file backup path, `kamal-backup` excludes the raw database, WAL, and shared-memory files from the restic file snapshot automatically.
 
 Put the backup settings in `config/kamal-backup.yml`:
 

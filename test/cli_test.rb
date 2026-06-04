@@ -127,6 +127,42 @@ class CLITest < Minitest::Test
     end
   end
 
+  def test_validate_accepts_yaml_path_excludes
+    Dir.mktmpdir do |dir|
+      storage = File.join(dir, "storage")
+      db = File.join(storage, "production.sqlite3")
+      config_dir = File.join(dir, "config")
+      FileUtils.mkdir_p(storage)
+      FileUtils.mkdir_p(config_dir)
+      File.write(db, "")
+      File.write(
+        File.join(config_dir, "kamal-backup.yml"),
+        <<~YAML
+          app: exclude-demo
+          databases:
+            - name: app
+              adapter: sqlite
+              path: #{db}
+          paths:
+            - path: #{storage}
+              exclude:
+                - #{storage}/*.sqlite3
+                - #{storage}/*.sqlite3-wal
+                - #{storage}/*.sqlite3-shm
+          restic:
+            repository: /tmp/restic-repo
+            password: restic-secret
+        YAML
+      )
+
+      out, _ = Dir.chdir(dir) do
+        capture_io { KamalBackup::CLI.start(["validate"], env: {}) }
+      end
+
+      assert_equal "ok\n", out
+    end
+  end
+
   def test_restore_local_prints_json_output
     fake = Object.new
     def fake.restore_to_local_machine(*)

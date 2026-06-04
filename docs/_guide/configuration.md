@@ -46,7 +46,7 @@ Edit that file for production. It is the main backup configuration: app name, da
 - `accessory`: the Kamal accessory name. The default is `backup`.
 - `app`: the app tag used on restic snapshots.
 - `databases`: one or more PostgreSQL, MySQL/MariaDB, or SQLite databases to back up.
-- `paths`: filesystem paths to snapshot from mounted volumes.
+- `paths`: filesystem paths to snapshot from mounted volumes. Entries can be strings or mappings with `path` and `exclude`.
 - `restic.repository`: the restic repository location, such as S3-compatible storage, a restic REST server, or a filesystem path.
 - `restic.password.secret`: the Kamal secret env var that contains the restic password.
 - `restic.rest.username` and `restic.rest.password`: optional restic REST server credentials. These become `RESTIC_REST_USERNAME` and `RESTIC_REST_PASSWORD`.
@@ -76,6 +76,24 @@ databases:
 {: data-title="config/kamal-backup.yml"}
 
 That path should be the live SQLite database file as mounted into the backup accessory. The SQLite adapter creates its own temporary backup file before sending it to restic.
+
+When a configured SQLite database file lives under a configured file backup path, `kamal-backup` automatically excludes that database file plus its `-wal` and `-shm` sidecar files from the restic file snapshot. The SQLite database backup still runs separately through `sqlite3 .backup`.
+
+You can also declare path-level excludes explicitly. These only apply to the restic file backup, not to database dump backups:
+
+```yaml
+databases:
+  - name: app
+    adapter: sqlite
+    path: /rails/storage/production.sqlite3
+paths:
+  - path: /rails/storage
+    exclude:
+      - /rails/storage/*.sqlite3
+      - /rails/storage/*.sqlite3-wal
+      - /rails/storage/*.sqlite3-shm
+```
+{: data-title="config/kamal-backup.yml"}
 
 For a live SQLite database in WAL mode, mount the storage volume read-write in the backup accessory so SQLite can open the database, WAL, and shared-memory files normally:
 

@@ -41,7 +41,7 @@ When a backup run starts, `kamal-backup` does five things:
 2. It creates database backups using the database-native export tool:
    PostgreSQL uses `pg_dump`, MySQL/MariaDB use `mariadb-dump` or `mysqldump`, and SQLite uses `sqlite3 .backup`.
 3. It streams each database backup into restic and tags it with `type:database`, `database:<name>`, and `adapter:<adapter>`.
-4. It runs one `restic backup` for the configured paths and tags that snapshot with `type:files`.
+4. It runs one `restic backup` for the configured paths and tags that snapshot with `type:files`. Path-level excludes and automatic SQLite database/WAL/SHM excludes apply only to this file snapshot.
 5. It optionally prunes old snapshots and runs the same repository verification as `kamal-backup check`, depending on configuration.
 
 The result is one database snapshot per database and one file snapshot per run.
@@ -54,6 +54,8 @@ The result is one database snapshot per database and one file snapshot per run.
 - file-backed Active Storage files that live on mounted volumes.
 
 If your Rails app already stores Active Storage blobs directly in S3, there may be no mounted file path to capture. In that case, `kamal-backup` still covers the database side, but S3 object backup and retention are a separate concern.
+
+For SQLite apps that store the database under the same mounted volume as Active Storage, the database is backed up through `sqlite3 .backup`; the raw SQLite database, WAL, and shared-memory files are excluded from the file snapshot so a full restore does not overwrite the clean SQLite restore with live raw files.
 
 ## What the commands mean
 

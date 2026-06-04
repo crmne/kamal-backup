@@ -22,6 +22,20 @@ class ResticTest < Minitest::Test
     end
   end
 
+  class CapturingPipeRestic < KamalBackup::Restic
+    attr_reader :consumer_argv
+
+    private
+
+    def pipe_commands(_producer, consumer, producer_label:, consumer_label:)
+      @consumer_argv = consumer.argv
+      KamalBackup::CommandResult.new(stdout: "", stderr: "", status: 0)
+    end
+
+    def log(_message)
+    end
+  end
+
   def test_snapshots_json_requires_all_requested_tags
     config = KamalBackup::Config.new(env: base_env("APP_NAME" => "demo"))
     json = [
@@ -46,6 +60,77 @@ class ResticTest < Minitest::Test
     assert_includes restic.last_args, "--tag"
     assert_includes restic.last_args, "path:data-storage"
     assert_includes restic.last_args, "path:data-uploads"
+  end
+
+  def test_backup_paths_passes_configured_excludes_to_restic
+    Dir.mktmpdir do |dir|
+      config_dir = File.join(dir, "config")
+      FileUtils.mkdir_p(config_dir)
+      File.write(
+        File.join(config_dir, "kamal-backup.yml"),
+        <<~YAML
+          app: demo
+          databases:
+            - name: app
+              adapter: postgres
+              url: postgres://app@postgres:5432/app_production
+          paths:
+            - path: /rails/storage
+              exclude:
+                - /rails/storage/*.sqlite3
+                - /rails/storage/*.sqlite3-wal
+                - /rails/storage/*.sqlite3-shm
+          restic:
+            repository: /tmp/restic-repo
+            password: restic-secret
+        YAML
+      )
+      config = KamalBackup::Config.new(env: {}, cwd: dir, load_project_defaults: false)
+      restic = FakeRestic.new(config, "[]")
+
+      restic.backup_paths(config.backup_paths, tags: ["type:files"])
+
+      exclude_pairs = restic.last_args.each_cons(2).select { |flag, _pattern| flag == "--exclude" }
+      assert_equal [
+        ["--exclude", "/rails/storage/*.sqlite3"],
+        ["--exclude", "/rails/storage/*.sqlite3-wal"],
+        ["--exclude", "/rails/storage/*.sqlite3-shm"]
+      ], exclude_pairs
+    end
+  end
+
+  def test_backup_paths_passes_automatic_sqlite_excludes_to_restic
+    config = KamalBackup::Config.new(env: base_env(
+      "APP_NAME" => "demo",
+      "DATABASE_ADAPTER" => "sqlite",
+      "SQLITE_DATABASE_PATH" => "/data/storage/production.sqlite3",
+      "BACKUP_PATHS" => "/data/storage"
+    ))
+    restic = FakeRestic.new(config, "[]")
+
+    restic.backup_paths(config.backup_paths, tags: ["type:files"])
+
+    exclude_pairs = restic.last_args.each_cons(2).select { |flag, _pattern| flag == "--exclude" }
+    assert_equal [
+      ["--exclude", "/data/storage/production.sqlite3"],
+      ["--exclude", "/data/storage/production.sqlite3-wal"],
+      ["--exclude", "/data/storage/production.sqlite3-shm"]
+    ], exclude_pairs
+  end
+
+  def test_backup_stream_does_not_apply_file_backup_excludes
+    config = KamalBackup::Config.new(env: base_env(
+      "APP_NAME" => "demo",
+      "DATABASE_ADAPTER" => "sqlite",
+      "SQLITE_DATABASE_PATH" => "/data/storage/production.sqlite3",
+      "BACKUP_PATHS" => "/data/storage"
+    ))
+    restic = CapturingPipeRestic.new(config, redactor: KamalBackup::Redactor.new(env: {}))
+    dump_command = KamalBackup::CommandSpec.new(argv: ["sqlite3", "/data/storage/production.sqlite3", ".dump"], env: {})
+
+    restic.backup_stream(dump_command, filename: "databases/demo/app/sqlite.sqlite3", tags: ["type:database"])
+
+    refute_includes restic.consumer_argv, "--exclude"
   end
 
   def test_backup_file_reports_restic_stderr_when_stdin_pipe_closes

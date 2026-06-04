@@ -51,6 +51,7 @@ module KamalBackup
         new(env: {}, database_definitions: nil, path_definitions: nil, restore_from_definitions: nil)
       end
     end
+    PathDefinition = Struct.new(:path, :exclude, keyword_init: true)
 
     class DatabaseSource
       CONNECTION_KEYS = %w[
@@ -225,10 +226,16 @@ module KamalBackup
 
     def backup_paths
       if path_definitions?
-        @path_definitions
+        @path_definitions.map(&:path)
       else
         legacy_backup_paths
       end
+    end
+
+    def backup_path_excludes(paths = backup_paths)
+      paths = Array(paths).compact.map(&:to_s).reject(&:empty?)
+
+      configured_backup_path_excludes(paths) + sqlite_backup_path_excludes(paths)
     end
 
     def local_restore_source_paths
@@ -500,7 +507,7 @@ module KamalBackup
           when "databases"
             result.database_definitions = normalize_yaml_databases(raw_value, raw_env: raw_env, path: path)
           when "paths"
-            result.path_definitions = normalize_yaml_paths(raw_value, "#{path} paths")
+            result.path_definitions = normalize_yaml_backup_paths(raw_value, "#{path} paths")
           when "restore_from"
             result.restore_from_definitions = normalize_yaml_paths(raw_value, "#{path} restore_from")
           when "restic"
@@ -684,6 +691,48 @@ module KamalBackup
         normalize_yaml_value(raw_value)
       end
 
+      def normalize_yaml_backup_paths(raw_value, context)
+        case raw_value
+        when Array
+          raw_value.map.with_index(1) do |entry, index|
+            normalize_yaml_backup_path(entry, "#{context}[#{index}]")
+          end.reject { |definition| definition.path.to_s.empty? }
+        when NilClass
+          []
+        else
+          [normalize_yaml_backup_path(raw_value, "#{context}[1]")].reject { |definition| definition.path.to_s.empty? }
+        end
+      end
+
+      def normalize_yaml_backup_path(raw_value, context)
+        case raw_value
+        when Hash
+          hash = require_mapping(raw_value, context)
+          unknown_keys = hash.keys - %w[path exclude]
+          unless unknown_keys.empty?
+            raise ConfigurationError, "#{context} contains unknown key #{unknown_keys.first.inspect}; expected path and exclude"
+          end
+
+          path = required_yaml_string(hash, "path", context)
+          exclude = hash.key?("exclude") ? normalize_yaml_excludes(hash["exclude"], "#{context}.exclude") : []
+          PathDefinition.new(path: path, exclude: exclude)
+        when Array
+          raise ConfigurationError, "#{context} must be a path string or a mapping with path and optional exclude"
+        else
+          PathDefinition.new(path: normalize_yaml_value(raw_value), exclude: [])
+        end
+      end
+
+      def normalize_yaml_excludes(raw_value, context)
+        entries = require_array(raw_value, context)
+        entries.map.with_index(1) do |entry, index|
+          pattern = optional_yaml_string(entry, "#{context}[#{index}]")
+          raise ConfigurationError, "#{context}[#{index}] must not be empty" if pattern.to_s.strip.empty?
+
+          pattern
+        end
+      end
+
       def resolve_yaml_value(raw_value, raw_env:, context:)
         case raw_value
         when Hash
@@ -741,6 +790,23 @@ module KamalBackup
         raise ConfigurationError, "#{context} must be a YAML mapping" unless value.is_a?(Hash)
 
         stringify_keys(value)
+      end
+
+      def optional_yaml_string(value, context)
+        if value.is_a?(Hash) || value.is_a?(Array)
+          raise ConfigurationError, "#{context} must be a string"
+        end
+
+        normalize_yaml_value(value)
+      end
+
+      def required_yaml_string(hash, key, context)
+        raise ConfigurationError, "#{context} #{key} is required" unless hash.key?(key)
+
+        value = optional_yaml_string(hash[key], "#{context}.#{key}")
+        raise ConfigurationError, "#{context} #{key} is required" if value.to_s.strip.empty?
+
+        value
       end
 
       def required_yaml_scalar(hash, key, context)
@@ -804,6 +870,36 @@ module KamalBackup
 
       def path_definitions?
         !@path_definitions.nil?
+      end
+
+      def backup_path_definitions
+        if path_definitions?
+          @path_definitions
+        else
+          legacy_backup_paths.map { |path| PathDefinition.new(path: path, exclude: []) }
+        end
+      end
+
+      def configured_backup_path_excludes(paths)
+        backup_path_definitions.each_with_object([]) do |definition, excludes|
+          excludes.concat(definition.exclude) if paths.include?(definition.path)
+        end
+      end
+
+      def sqlite_backup_path_excludes(paths)
+        databases.select { |database| database.database_adapter == "sqlite" }.flat_map do |database|
+          sqlite_database_path = database.value("SQLITE_DATABASE_PATH")
+          next [] if sqlite_database_path.to_s.empty?
+          next [] unless paths.any? { |path| path_contains?(path, sqlite_database_path) }
+
+          [sqlite_database_path, "#{sqlite_database_path}-wal", "#{sqlite_database_path}-shm"]
+        end.uniq
+      end
+
+      def path_contains?(parent, child)
+        expanded_parent = File.expand_path(parent)
+        expanded_child = File.expand_path(child)
+        expanded_child == expanded_parent || expanded_child.start_with?(expanded_parent + "/")
       end
 
       def legacy_database_adapter

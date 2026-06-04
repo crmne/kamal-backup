@@ -279,6 +279,68 @@ class ConfigTest < Minitest::Test
     end
   end
 
+  def test_loads_yaml_backup_paths_with_excludes
+    Dir.mktmpdir do |dir|
+      config_dir = File.join(dir, "config")
+      FileUtils.mkdir_p(config_dir)
+      File.write(
+        File.join(config_dir, "kamal-backup.yml"),
+        <<~YAML
+          app: excluded-files
+          databases:
+            - name: app
+              adapter: postgres
+              url: postgres://app@postgres:5432/app_production
+          paths:
+            - path: /rails/storage
+              exclude:
+                - /rails/storage/*.sqlite3
+                - /rails/storage/*.sqlite3-wal
+                - /rails/storage/*.sqlite3-shm
+            - /rails/uploads
+          restic:
+            repository: /tmp/restic-repo
+            password: restic-secret
+        YAML
+      )
+
+      config = KamalBackup::Config.new(env: {}, cwd: dir, load_project_defaults: false)
+
+      assert_equal ["/rails/storage", "/rails/uploads"], config.backup_paths
+      assert_equal [
+        "/rails/storage/*.sqlite3",
+        "/rails/storage/*.sqlite3-wal",
+        "/rails/storage/*.sqlite3-shm"
+      ], config.backup_path_excludes(["/rails/storage"])
+      assert_empty config.backup_path_excludes(["/rails/uploads"])
+      config.validate_backup(check_files: false)
+    end
+  end
+
+  def test_adds_sqlite_database_files_to_backup_path_excludes
+    config = KamalBackup::Config.new(env: base_env(
+      "DATABASE_ADAPTER" => "sqlite",
+      "SQLITE_DATABASE_PATH" => "/rails/storage/production.sqlite3",
+      "BACKUP_PATHS" => "/rails/storage"
+    ))
+
+    assert_equal [
+      "/rails/storage/production.sqlite3",
+      "/rails/storage/production.sqlite3-wal",
+      "/rails/storage/production.sqlite3-shm"
+    ], config.backup_path_excludes
+  end
+
+  def test_does_not_add_sqlite_excludes_when_database_is_outside_backup_paths
+    config = KamalBackup::Config.new(env: base_env(
+      "DATABASE_ADAPTER" => "sqlite",
+      "SQLITE_DATABASE_PATH" => "/rails/db/production.sqlite3",
+      "BACKUP_PATHS" => "/rails/storage"
+    ))
+
+    assert_empty config.backup_path_excludes
+  end
+
   def test_loads_restic_rest_credentials_from_yaml
     Dir.mktmpdir do |dir|
       config_dir = File.join(dir, "config")
@@ -419,7 +481,7 @@ class ConfigTest < Minitest::Test
     end
   end
 
-  def test_paths_reject_hash_entries_for_now
+  def test_paths_reject_unknown_hash_entry_keys
     Dir.mktmpdir do |dir|
       config_dir = File.join(dir, "config")
       FileUtils.mkdir_p(config_dir)
@@ -429,6 +491,8 @@ class ConfigTest < Minitest::Test
           app: bad-paths
           paths:
             - path: /data/storage
+              excludes:
+                - tmp
         YAML
       )
 
@@ -436,7 +500,51 @@ class ConfigTest < Minitest::Test
         KamalBackup::Config.new(env: {}, cwd: dir, load_project_defaults: false)
       end
 
-      assert_match(/paths entries must be path strings/, error.message)
+      assert_match(/paths\[1\] contains unknown key "excludes"/, error.message)
+    end
+  end
+
+  def test_paths_reject_invalid_exclude_shapes
+    Dir.mktmpdir do |dir|
+      config_dir = File.join(dir, "config")
+      FileUtils.mkdir_p(config_dir)
+      File.write(
+        File.join(config_dir, "kamal-backup.yml"),
+        <<~YAML
+          app: bad-paths
+          paths:
+            - path: /data/storage
+              exclude: /data/storage/*.sqlite3
+        YAML
+      )
+
+      error = assert_raises(KamalBackup::ConfigurationError) do
+        KamalBackup::Config.new(env: {}, cwd: dir, load_project_defaults: false)
+      end
+
+      assert_match(/paths\[1\]\.exclude must be a YAML sequence/, error.message)
+    end
+  end
+
+  def test_paths_reject_entries_without_path
+    Dir.mktmpdir do |dir|
+      config_dir = File.join(dir, "config")
+      FileUtils.mkdir_p(config_dir)
+      File.write(
+        File.join(config_dir, "kamal-backup.yml"),
+        <<~YAML
+          app: bad-paths
+          paths:
+            - exclude:
+                - /data/storage/*.sqlite3
+        YAML
+      )
+
+      error = assert_raises(KamalBackup::ConfigurationError) do
+        KamalBackup::Config.new(env: {}, cwd: dir, load_project_defaults: false)
+      end
+
+      assert_match(/paths\[1\] path is required/, error.message)
     end
   end
 

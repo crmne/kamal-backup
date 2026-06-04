@@ -75,8 +75,9 @@ module KamalBackup
 
       if paths.any?
         path_tags = paths.map { |path| "path:#{config.backup_path_label(path)}" }
+        excludes = config.backup_path_excludes(paths)
         log("backing up #{paths.size} file path(s): #{paths.join(", ")}")
-        run(["backup"] + host_args + paths + tag_args(common_tags + tags + path_tags))
+        run(["backup"] + host_args + exclude_args(excludes) + paths + tag_args(common_tags + tags + path_tags))
       end
     end
 
@@ -234,6 +235,10 @@ module KamalBackup
 
       def tag_args(tags)
         tags.compact.each_with_object([]) { |tag, args| args.concat(["--tag", tag]) }
+      end
+
+      def exclude_args(patterns)
+        patterns.compact.each_with_object([]) { |pattern, args| args.concat(["--exclude", pattern]) }
       end
 
       def host_args
