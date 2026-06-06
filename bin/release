@@ -106,7 +106,7 @@ def update_version_file!(version)
   abort_with("Could not find VERSION assignment in #{VERSION_FILE}.") unless current
   return if current == version
 
-  updated = contents.sub(/VERSION\s*=\s*["'][^"']+["']/, "VERSION = #{version.inspect}")
+  updated = contents.sub(/VERSION\s*=\s*["'][^"']+["']/, "VERSION = '#{version}'")
 
   File.write(VERSION_FILE, updated)
 end

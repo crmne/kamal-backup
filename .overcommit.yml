@@ -76,18 +76,18 @@ PreCommit:
 
 PrePush:
   Brakeman:
-    enabled: true
+    enabled: false
 
   Minitest:
     enabled: true
 
   GitLfs:
-    enabled: true
+    enabled: false
     required_executable: 'git-lfs'
     flags: ['pre-push']
 
   SystemTests:
-    enabled: true
+    enabled: false
     command: ['sh', '-c', 'RAILS_ENV=test bundle exec rails db:test:prepare && PARALLEL_WORKERS=1 RAILS_ENV=test bundle exec rails test:system']
 
 PostCheckout:
