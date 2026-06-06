@@ -1,12 +1,14 @@
-require "fileutils"
-require "json"
-require "shellwords"
-require "thor"
-require_relative "app"
-require_relative "config"
-require_relative "kamal_bridge"
-require_relative "redactor"
-require_relative "version"
+# frozen_string_literal: true
+
+require 'fileutils'
+require 'json'
+require 'shellwords'
+require 'thor'
+require_relative 'app'
+require_relative 'config'
+require_relative 'kamal_bridge'
+require_relative 'redactor'
+require_relative 'version'
 
 module KamalBackup
   class CLI < Thor
@@ -38,17 +40,15 @@ module KamalBackup
       end
 
       def local_command_config
-        @local_command_config ||= begin
-          if deployment_mode?
-            Config.new(
-              env: command_env,
-              defaults: production_source_defaults,
-              config_paths: [Config::LOCAL_CONFIG_PATH]
-            )
-          else
-            Config.new(env: command_env)
-          end
-        end
+        @local_command_config ||= if deployment_mode?
+                                    Config.new(
+                                      env: command_env,
+                                      defaults: production_source_defaults,
+                                      config_paths: [Config::LOCAL_CONFIG_PATH]
+                                    )
+                                  else
+                                    Config.new(env: command_env)
+                                  end
       end
 
       def production_source_defaults
@@ -59,10 +59,10 @@ module KamalBackup
         config = Config.new(env: {}, config_paths: [Config::SHARED_CONFIG_PATH], load_project_defaults: false)
 
         {}.tap do |defaults|
-          defaults["APP_NAME"] = config.app_name if config.app_name
-          defaults["DATABASE_ADAPTER"] = config.database_adapter if config.database_adapter
-          defaults["RESTIC_REPOSITORY"] = config.restic_repository if config.restic_repository
-          defaults["LOCAL_RESTORE_SOURCE_PATHS"] = config.backup_paths.join("\n") if config.backup_paths.any?
+          defaults['APP_NAME'] = config.app_name if config.app_name
+          defaults['DATABASE_ADAPTER'] = config.database_adapter if config.database_adapter
+          defaults['RESTIC_REPOSITORY'] = config.restic_repository if config.restic_repository
+          defaults['LOCAL_RESTORE_SOURCE_PATHS'] = config.backup_paths.join("\n") if config.backup_paths.any?
         end
       end
 
@@ -121,27 +121,27 @@ module KamalBackup
       end
 
       def accessory_reboot_command
-        argv = ["bin/kamal", "accessory", "reboot", accessory_name]
-        argv.concat(["-c", options[:config_file]]) if options[:config_file]
-        argv.concat(["-d", options[:destination]]) if options[:destination]
+        argv = ['bin/kamal', 'accessory', 'reboot', accessory_name]
+        argv.concat(['-c', options[:config_file]]) if options[:config_file]
+        argv.concat(['-d', options[:destination]]) if options[:destination]
         Shellwords.join(argv)
       end
 
       def print_remote_version_status
-        status = remote_version == VERSION ? "in sync" : "out of sync"
-        status_color = status == "in sync" ? :green : :red
+        status = remote_version == VERSION ? 'in sync' : 'out of sync'
+        status_color = status == 'in sync' ? :green : :red
         status_output = CommandOutput.new(io: $stdout, env: command_env)
 
         puts("local: #{VERSION}")
         puts("remote: #{remote_version}")
         puts("status: #{status_output.decorate(status, status_color, :bold)}")
-        puts("fix: #{status_output.decorate(accessory_reboot_command, :yellow, :bold)}") if status == "out of sync"
+        puts("fix: #{status_output.decorate(accessory_reboot_command, :yellow, :bold)}") if status == 'out of sync'
       end
 
       def print_backup_result(result)
         return unless result.is_a?(Hash)
 
-        if result[:status] == "skipped"
+        if result[:status] == 'skipped'
           puts("No backup due. Last backup finished at #{result.fetch(:last_backup_at)}.")
           puts("Next backup is due at #{result.fetch(:next_backup_at)}.")
           puts("Run `#{result.fetch(:force_command)}` to force a backup now.")
@@ -153,7 +153,7 @@ module KamalBackup
           puts("database #{database.fetch(:database)}: #{database.fetch(:snapshot)} at #{database.fetch(:time)}")
         end
 
-        if files = result[:files]
+        if (files = result[:files])
           puts("files: #{files.fetch(:snapshot)} at #{files.fetch(:time)}")
         end
       end
@@ -162,7 +162,7 @@ module KamalBackup
         output = Array(results).map(&:stdout).join
 
         if output.empty?
-          puts("Prune completed")
+          puts('Prune completed')
         else
           print(output)
           puts unless output.end_with?("\n")
@@ -181,30 +181,28 @@ module KamalBackup
       def confirm!(message)
         return if options[:yes]
 
-        unless $stdin.tty?
-          raise ConfigurationError, "confirmation required; rerun with --yes"
-        end
+        raise ConfigurationError, 'confirmation required; rerun with --yes' unless $stdin.tty?
 
-        unless yes?("#{message} [y/N]")
-          raise ConfigurationError, "aborted"
-        end
+        raise ConfigurationError, 'aborted' unless yes?("#{message} [y/N]")
       end
 
       def confirm_production_restore!(snapshot)
         return if options[:"confirm-production-restore"]
 
         if options[:yes]
-          raise ConfigurationError, "--yes does not bypass restore production; use --confirm-production-restore only for deliberate automation"
+          raise ConfigurationError,
+                '--yes does not bypass restore production; use --confirm-production-restore only for deliberate automation'
         end
 
         unless $stdin.tty?
-          raise ConfigurationError, "production restore confirmation required; rerun interactively or pass --confirm-production-restore only for deliberate automation"
+          raise ConfigurationError,
+                'production restore confirmation required; rerun interactively or pass --confirm-production-restore only for deliberate automation'
         end
 
         app_name = production_restore_confirmation_config.required_app_name
         say "This will overwrite the production database and file paths for #{app_name} from backup #{snapshot}.", :red
-        require_typed_confirmation("Type the app name to continue", app_name)
-        require_typed_confirmation("Type RESTORE PRODUCTION to continue", "RESTORE PRODUCTION")
+        require_typed_confirmation('Type the app name to continue', app_name)
+        require_typed_confirmation('Type RESTORE PRODUCTION to continue', 'RESTORE PRODUCTION')
         confirm!("Restore #{snapshot} into production now? This will overwrite production data.")
       end
 
@@ -212,7 +210,7 @@ module KamalBackup
         answer = ask("#{prompt}:").to_s.strip
         return if answer == expected
 
-        raise ConfigurationError, "aborted"
+        raise ConfigurationError, 'aborted'
       end
 
       def production_restore_confirmation_config
@@ -228,16 +226,12 @@ module KamalBackup
       end
 
       def prompt_required(label)
-        unless $stdin.tty?
-          raise ConfigurationError, "#{label.downcase} is required; pass it on the command line"
-        end
+        raise ConfigurationError, "#{label.downcase} is required; pass it on the command line" unless $stdin.tty?
 
         value = ask("#{label}:").to_s.strip
-        if value.empty?
-          raise ConfigurationError, "#{label.downcase} is required"
-        else
-          value
-        end
+        raise ConfigurationError, "#{label.downcase} is required" if value.empty?
+
+        value
       end
 
       def init_config_root
@@ -246,7 +240,7 @@ module KamalBackup
       end
 
       def shared_config_path
-        File.join(init_config_root, "kamal-backup.yml")
+        File.join(init_config_root, 'kamal-backup.yml')
       end
 
       def write_init_file(path, contents)
@@ -305,9 +299,9 @@ module KamalBackup
     class CommandBase < Thor
       include Helpers
 
-      class_option :yes, aliases: "-y", type: :boolean, default: false, desc: "Skip confirmation prompt"
-      class_option :config_file, aliases: "-c", type: :string, desc: "Path to Kamal deploy config file"
-      class_option :destination, aliases: "-d", type: :string, desc: "Kamal destination to use"
+      class_option :yes, aliases: '-y', type: :boolean, default: false, desc: 'Skip confirmation prompt'
+      class_option :config_file, aliases: '-c', type: :string, desc: 'Path to Kamal deploy config file'
+      class_option :destination, aliases: '-d', type: :string, desc: 'Kamal destination to use'
       remove_command :tree
     end
 
@@ -316,19 +310,20 @@ module KamalBackup
         CLI.basename
       end
 
-      desc "local [SNAPSHOT]", "Restore the backup into the local database and Active Storage path"
-      def local(snapshot = "latest")
+      desc 'local [SNAPSHOT]', 'Restore the backup into the local database and Active Storage path'
+      def local(snapshot = 'latest')
         confirm!("Restore #{snapshot} into the local database and Active Storage path? This will overwrite local data.")
         puts(JSON.pretty_generate(local_restore_app.restore_to_local_machine(snapshot)))
       end
 
-      method_option :"confirm-production-restore", type: :boolean, default: false, desc: "Confirm production restore without interactive prompts"
-      desc "production [SNAPSHOT]", "Restore the backup into the production database and Active Storage path"
-      def production(snapshot = "latest")
+      method_option :"confirm-production-restore", type: :boolean, default: false,
+                                                   desc: 'Confirm production restore without interactive prompts'
+      desc 'production [SNAPSHOT]', 'Restore the backup into the production database and Active Storage path'
+      def production(snapshot = 'latest')
         confirm_production_restore!(snapshot)
 
         if deployment_mode?
-          exec_remote(["kamal-backup", "restore", "production", snapshot, "--confirm-production-restore"])
+          exec_remote(['kamal-backup', 'restore', 'production', snapshot, '--confirm-production-restore'])
         else
           puts(JSON.pretty_generate(direct_app.restore_to_production(snapshot)))
         end
@@ -340,28 +335,29 @@ module KamalBackup
         CLI.basename
       end
 
-      method_option :check, type: :string, desc: "Run a verification command after the restore"
-      desc "local [SNAPSHOT]", "Run a restore drill on the local machine"
-      def local(snapshot = "latest")
+      method_option :check, type: :string, desc: 'Run a verification command after the restore'
+      desc 'local [SNAPSHOT]', 'Run a restore drill on the local machine'
+      def local(snapshot = 'latest')
         confirm!("Run a local restore drill for #{snapshot}? This will overwrite local data.")
         result = local_restore_app.drill_on_local_machine(snapshot, check_command: options[:check])
         puts(JSON.pretty_generate(result))
         exit(1) if local_restore_app.drill_failed?(result)
       end
 
-      method_option :database, type: :string, desc: "Scratch database name for PostgreSQL or MySQL"
-      method_option :"sqlite-path", type: :string, desc: "Scratch SQLite path for production-side drills"
-      method_option :files, type: :string, default: "/restore/files", desc: "Scratch Active Storage target for the drill"
-      method_option :check, type: :string, desc: "Run a verification command after the restore"
-      desc "production [SNAPSHOT]", "Run a restore drill on production infrastructure using scratch targets"
-      def production(snapshot = "latest")
+      method_option :database, type: :string, desc: 'Scratch database name for PostgreSQL or MySQL'
+      method_option :"sqlite-path", type: :string, desc: 'Scratch SQLite path for production-side drills'
+      method_option :files, type: :string, default: '/restore/files',
+                            desc: 'Scratch Active Storage target for the drill'
+      method_option :check, type: :string, desc: 'Run a verification command after the restore'
+      desc 'production [SNAPSHOT]', 'Run a restore drill on production infrastructure using scratch targets'
+      def production(snapshot = 'latest')
         confirm!("Run a production-side restore drill for #{snapshot}? This will restore into scratch targets on production infrastructure.")
 
         if deployment_mode?
-          argv = ["kamal-backup", "drill", "production", snapshot, "--files", options[:files], "--yes"]
-          argv.concat(["--database", production_database_name]) if production_database_name
-          argv.concat(["--sqlite-path", options[:"sqlite-path"]]) if options[:"sqlite-path"]
-          argv.concat(["--check", options[:check]]) if options[:check]
+          argv = ['kamal-backup', 'drill', 'production', snapshot, '--files', options[:files], '--yes']
+          argv.concat(['--database', production_database_name]) if production_database_name
+          argv.concat(['--sqlite-path', options[:"sqlite-path"]]) if options[:"sqlite-path"]
+          argv.concat(['--check', options[:check]]) if options[:check]
           exec_remote(argv)
         else
           result = direct_app.drill_on_production(
@@ -378,10 +374,10 @@ module KamalBackup
 
       no_commands do
         def production_database_name
-          if local_command_config.database_adapter == "sqlite"
+          if local_command_config.database_adapter == 'sqlite'
             nil
           else
-            options[:database] || prompt_required("Scratch database name")
+            options[:database] || prompt_required('Scratch database name')
           end
         end
       end
@@ -398,7 +394,7 @@ module KamalBackup
           token = tokens.first
 
           case token
-          when "-d", "--destination", "-c", "--config-file"
+          when '-d', '--destination', '-c', '--config-file'
             leading << tokens.shift
             leading << tokens.shift if tokens.any?
           when /\A--destination=.+\z/, /\A--config-file=.+\z/
@@ -416,18 +412,18 @@ module KamalBackup
       end
     end
 
-    package_name "kamal-backup"
+    package_name 'kamal-backup'
     map %w[-v --version] => :version
-    class_option :config_file, aliases: "-c", type: :string, desc: "Path to Kamal deploy config file"
-    class_option :destination, aliases: "-d", type: :string, desc: "Kamal destination to use"
+    class_option :config_file, aliases: '-c', type: :string, desc: 'Path to Kamal deploy config file'
+    class_option :destination, aliases: '-d', type: :string, desc: 'Kamal destination to use'
     remove_command :tree
-    desc "restore SUBCOMMAND ...ARGS", "Restore a database and Active Storage backup locally or into production"
-    subcommand "restore", RestoreCLI
-    desc "drill SUBCOMMAND ...ARGS", "Run a restore drill on the local machine or on production infrastructure"
-    subcommand "drill", DrillCLI
+    desc 'restore SUBCOMMAND ...ARGS', 'Restore a database and Active Storage backup locally or into production'
+    subcommand 'restore', RestoreCLI
+    desc 'drill SUBCOMMAND ...ARGS', 'Run a restore drill on the local machine or on production infrastructure'
+    subcommand 'drill', DrillCLI
 
     def self.basename
-      "kamal-backup"
+      'kamal-backup'
     end
 
     def self.start(argv = ARGV, env: ENV)
@@ -446,7 +442,7 @@ module KamalBackup
       exit(1)
     rescue Interrupt
       output ||= CommandOutput.new(io: $stderr, env: env)
-      output.error("(Interrupt): interrupted", redactor: Redactor.new(env: env))
+      output.error('(Interrupt): interrupted', redactor: Redactor.new(env: env))
       exit(130)
     ensure
       self.command_env = nil
@@ -454,55 +450,56 @@ module KamalBackup
 
     include Helpers
 
-    method_option :force, type: :boolean, default: false, desc: "Run a backup even if the configured schedule is not due"
-    desc "backup", "Run a due database and Active Storage backup"
+    method_option :force, type: :boolean, default: false,
+                          desc: 'Run a backup even if the configured schedule is not due'
+    desc 'backup', 'Run a due database and Active Storage backup'
     def backup
       if remote_command_mode?
-        argv = ["kamal-backup", "backup"]
-        argv << "--force" if options[:force]
+        argv = %w[kamal-backup backup]
+        argv << '--force' if options[:force]
         exec_remote(argv)
       else
         print_backup_result(direct_app.backup(force: options[:force]))
       end
     end
 
-    desc "list", "List matching restic snapshots"
+    desc 'list', 'List matching restic snapshots'
     def list
       if remote_command_mode?
-        exec_remote(["kamal-backup", "list"])
+        exec_remote(%w[kamal-backup list])
       else
         puts(direct_app.snapshots)
       end
     end
 
-    desc "check", "Run restic check and record the latest result"
+    desc 'check', 'Run restic check and record the latest result'
     def check
       if remote_command_mode?
-        exec_remote(["kamal-backup", "check"])
+        exec_remote(%w[kamal-backup check])
       else
         puts(direct_app.check)
       end
     end
 
-    desc "prune", "Apply the configured restic retention policy and prune unneeded data"
+    desc 'prune', 'Apply the configured restic retention policy and prune unneeded data'
     def prune
       if remote_command_mode?
-        exec_remote(["kamal-backup", "prune"])
+        exec_remote(%w[kamal-backup prune])
       else
         print_prune_result(direct_app.prune)
       end
     end
 
-    desc "evidence", "Print redacted backup, check, and restore-drill evidence as JSON"
+    desc 'evidence', 'Print redacted backup, check, and restore-drill evidence as JSON'
     def evidence
       if remote_command_mode?
-        exec_remote(["kamal-backup", "evidence"])
+        exec_remote(%w[kamal-backup evidence])
       else
         puts(direct_app.evidence)
       end
     end
 
-    desc "validate", "Validate backup configuration without running a backup"
+    desc 'validate', 'Validate backup configuration without running a backup'
     def validate
       if remote_command_mode?
         validate_deploy_config
@@ -510,34 +507,34 @@ module KamalBackup
         direct_app.validate
       end
 
-      puts("ok")
+      puts('ok')
     end
 
-    desc "init", "Create config and print the scheduled backup accessory snippet"
+    desc 'init', 'Create config and print the scheduled backup accessory snippet'
     def init
       write_init_file(shared_config_path, shared_config_template)
 
       puts
-      puts "Add this accessory block to your Kamal deploy config:"
+      puts 'Add this accessory block to your Kamal deploy config:'
       puts
       puts deploy_snippet
       puts
-      puts "The accessory runs scheduled database and file backups with backup.schedule."
-      puts "For most Rails apps, restore local and drill local can infer the development database, Active Storage path, and tmp state directory."
-      puts "Local restore and drill also require the restic binary on your machine."
-      puts "Create config/kamal-backup.local.yml only if you need to override those local defaults."
+      puts 'The accessory runs scheduled database and file backups with backup.schedule.'
+      puts 'For most Rails apps, restore local and drill local can infer the development database, Active Storage path, and tmp state directory.'
+      puts 'Local restore and drill also require the restic binary on your machine.'
+      puts 'Create config/kamal-backup.local.yml only if you need to override those local defaults.'
     end
 
-    desc "schedule", "Run the foreground scheduler loop"
+    desc 'schedule', 'Run the foreground scheduler loop'
     def schedule
       if deployment_mode?
-        exec_remote(["kamal-backup", "schedule"])
+        exec_remote(%w[kamal-backup schedule])
       else
         direct_app.schedule
       end
     end
 
-    desc "version", "Print the running kamal-backup version"
+    desc 'version', 'Print the running kamal-backup version'
     def version
       if remote_command_mode?
         print_remote_version_status
@@ -545,6 +542,5 @@ module KamalBackup
         puts(VERSION)
       end
     end
-
   end
 end

@@ -1,4 +1,6 @@
-require "time"
+# frozen_string_literal: true
+
+require 'time'
 
 module KamalBackup
   class Scheduler
@@ -32,21 +34,22 @@ module KamalBackup
     end
 
     private
-      def install_signal_handlers
-        %w[TERM INT].each do |signal|
-          Signal.trap(signal) { @stop = true }
-        rescue ArgumentError
-          nil
-        end
-      end
 
-      def sleep_interruptibly(seconds)
-        deadline = Time.now + seconds
-        sleep([deadline - Time.now, 1].min) while !@stop && Time.now < deadline
+    def install_signal_handlers
+      %w[TERM INT].each do |signal|
+        Signal.trap(signal) { @stop = true }
+      rescue ArgumentError
+        nil
       end
+    end
 
-      def log(message)
-        $stdout.puts("[kamal-backup] #{message}")
-      end
+    def sleep_interruptibly(seconds)
+      deadline = Time.now + seconds
+      sleep([deadline - Time.now, 1].min) while !@stop && Time.now < deadline
+    end
+
+    def log(message)
+      $stdout.puts("[kamal-backup] #{message}")
+    end
   end
 end

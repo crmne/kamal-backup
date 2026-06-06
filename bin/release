@@ -1,13 +1,13 @@
 #!/usr/bin/env ruby
 # frozen_string_literal: true
 
-require "open3"
-require "rubygems/version"
-require "shellwords"
+require 'open3'
+require 'rubygems/version'
+require 'shellwords'
 
-ROOT = File.expand_path("..", __dir__)
-VERSION_FILE = File.join(ROOT, "lib/kamal_backup/version.rb")
-LOCKFILE = File.join(ROOT, "Gemfile.lock")
+ROOT = File.expand_path('..', __dir__)
+VERSION_FILE = File.join(ROOT, 'lib/kamal_backup/version.rb')
+LOCKFILE = File.join(ROOT, 'Gemfile.lock')
 
 def abort_with(message)
   warn(message)
@@ -29,7 +29,7 @@ def capture(*argv, chdir: ROOT)
 end
 
 def changed_paths
-  capture("git", "status", "--porcelain").lines.map { |line| line[3..].strip }
+  capture('git', 'status', '--porcelain').lines.map { |line| line[3..].strip }
 end
 
 def current_version
@@ -44,44 +44,44 @@ def ensure_lockfile_version!(version)
   locked = locked_version
   return if locked == version
 
-  abort_with("Gemfile.lock records kamal-backup #{locked || "unknown"}, expected #{version}.")
+  abort_with("Gemfile.lock records kamal-backup #{locked || 'unknown'}, expected #{version}.")
 end
 
 def ensure_releasable_worktree!(version)
   paths = changed_paths
   return if paths.empty?
 
-  allowed_paths = ["Gemfile.lock", "lib/kamal_backup/version.rb"]
+  allowed_paths = ['Gemfile.lock', 'lib/kamal_backup/version.rb']
   if (paths - allowed_paths).empty? && current_version == version
     puts "Continuing release #{version} from existing version bump."
     return
   end
 
-  abort_with("Working tree is not clean. Commit or stash changes before releasing.")
+  abort_with('Working tree is not clean. Commit or stash changes before releasing.')
 end
 
 def ensure_master_branch!
-  branch = capture("git", "branch", "--show-current").strip
-  abort_with("Release must run from master, not #{branch.empty? ? "detached HEAD" : branch}.") unless branch == "master"
+  branch = capture('git', 'branch', '--show-current').strip
+  abort_with("Release must run from master, not #{branch.empty? ? 'detached HEAD' : branch}.") unless branch == 'master'
 end
 
 def ensure_current_with_origin!
-  run("git", "fetch", "origin", "master", "--tags")
-  current = capture("git", "rev-parse", "HEAD").strip
-  upstream = capture("git", "rev-parse", "origin/master").strip
+  run('git', 'fetch', 'origin', 'master', '--tags')
+  current = capture('git', 'rev-parse', 'HEAD').strip
+  upstream = capture('git', 'rev-parse', 'origin/master').strip
   return if current == upstream
-  return if system("git", "merge-base", "--is-ancestor", "origin/master", "HEAD", chdir: ROOT)
+  return if system('git', 'merge-base', '--is-ancestor', 'origin/master', 'HEAD', chdir: ROOT)
 
-  abort_with("Local master does not contain origin/master. Pull or rebase before releasing.")
+  abort_with('Local master does not contain origin/master. Pull or rebase before releasing.')
 end
 
 def ensure_newer_than_latest_tag!(version)
-  latest_tag = capture("git", "tag", "--sort=-v:refname", "--list", "v*").lines.map(&:strip).find do |tag|
-    Gem::Version.correct?(tag.sub(/\Av/i, ""))
+  latest_tag = capture('git', 'tag', '--sort=-v:refname', '--list', 'v*').lines.map(&:strip).find do |tag|
+    Gem::Version.correct?(tag.sub(/\Av/i, ''))
   end
   return unless latest_tag
 
-  latest_version = Gem::Version.new(latest_tag.sub(/\Av/i, ""))
+  latest_version = Gem::Version.new(latest_tag.sub(/\Av/i, ''))
   requested_version = Gem::Version.new(version)
   return if requested_version > latest_version
 
@@ -89,11 +89,11 @@ def ensure_newer_than_latest_tag!(version)
 end
 
 def parse_version(argument)
-  raw = argument.to_s.strip.sub(/\Av/i, "")
-  abort_with("Usage: bin/release VERSION [--no-push]") if raw.empty?
+  raw = argument.to_s.strip.sub(/\Av/i, '')
+  abort_with('Usage: bin/release VERSION [--no-push]') if raw.empty?
 
   version = Gem::Version.new(raw)
-  abort_with("Version must contain at least major.minor.patch.") if version.segments.length < 3
+  abort_with('Version must contain at least major.minor.patch.') if version.segments.length < 3
 
   raw
 rescue ArgumentError
@@ -116,7 +116,7 @@ push = true
 
 flags.each do |flag|
   case flag
-  when "--no-push"
+  when '--no-push'
     push = false
   else
     abort_with("Unknown option: #{flag}")
@@ -133,14 +133,14 @@ ensure_releasable_worktree!(version)
 
 update_version_file!(version)
 
-run("git", "diff", "--check")
-run("bundle", "install", stdin: File::NULL)
+run('git', 'diff', '--check')
+run('bundle', 'install', stdin: File::NULL)
 ensure_lockfile_version!(version)
-run("git", "add", VERSION_FILE, LOCKFILE)
-run("git", "commit", "-m", "Release #{version}")
+run('git', 'add', VERSION_FILE, LOCKFILE)
+run('git', 'commit', '-m', "Release #{version}")
 
 if push
-  run("git", "push", "origin", "master")
+  run('git', 'push', 'origin', 'master')
   puts "Release #{tag} pushed. CI will publish the gem and Docker images, then create the tag, GitHub release, and docs."
 else
   puts "Release #{tag} prepared locally. Push with: git push origin master"

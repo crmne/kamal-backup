@@ -1,4 +1,6 @@
-require_relative "test_helper"
+# frozen_string_literal: true
+
+require_relative 'test_helper'
 
 class DatabaseAdaptersTest < Minitest::Test
   def redactor
@@ -7,25 +9,25 @@ class DatabaseAdaptersTest < Minitest::Test
 
   def test_postgres_dump_command_uses_custom_format
     config = KamalBackup::Config.new(env: base_env(
-      "DATABASE_ADAPTER" => "postgres",
-      "DATABASE_URL" => "postgres://app:secret@db/app"
+      'DATABASE_ADAPTER' => 'postgres',
+      'DATABASE_URL' => 'postgres://app:secret@db/app'
     ))
     adapter = KamalBackup::Databases::Postgres.new(config, redactor: redactor)
     command = adapter.dump_command
 
     assert_equal [
-      "pg_dump",
-      "--format=custom",
-      "--no-owner",
-      "--no-privileges"
+      'pg_dump',
+      '--format=custom',
+      '--no-owner',
+      '--no-privileges'
     ], command.argv
-    refute_includes command.argv.join(" "), "secret"
+    refute_includes command.argv.join(' '), 'secret'
     assert_equal(
       {
-        "PGHOST" => "db",
-        "PGUSER" => "app",
-        "PGPASSWORD" => "secret",
-        "PGDATABASE" => "app"
+        'PGHOST' => 'db',
+        'PGUSER' => 'app',
+        'PGPASSWORD' => 'secret',
+        'PGDATABASE' => 'app'
       },
       command.env
     )
@@ -33,32 +35,32 @@ class DatabaseAdaptersTest < Minitest::Test
 
   def test_database_backup_uses_stable_filename_and_tags
     config = KamalBackup::Config.new(env: base_env(
-      "APP_NAME" => "chatwithwork",
-      "DATABASE_ADAPTER" => "postgres",
-      "DATABASE_URL" => "postgres://app:secret@db/app"
+      'APP_NAME' => 'chatwithwork',
+      'DATABASE_ADAPTER' => 'postgres',
+      'DATABASE_URL' => 'postgres://app:secret@db/app'
     ))
     adapter = KamalBackup::Databases::Postgres.new(config, redactor: redactor)
 
-    assert_equal "databases/chatwithwork/app/postgres.pgdump", adapter.database_filename
-    assert_equal ["type:database", "database:app", "adapter:postgres"], adapter.backup_tags
+    assert_equal 'databases/chatwithwork/app/postgres.pgdump', adapter.database_filename
+    assert_equal ['type:database', 'database:app', 'adapter:postgres'], adapter.backup_tags
   end
 
   def test_postgres_current_restore_uses_current_database_url
     config = KamalBackup::Config.new(env: base_env(
-      "DATABASE_ADAPTER" => "postgres",
-      "DATABASE_URL" => "postgres://app:secret@db/app_development"
+      'DATABASE_ADAPTER' => 'postgres',
+      'DATABASE_URL' => 'postgres://app:secret@db/app_development'
     ))
     adapter = KamalBackup::Databases::Postgres.new(config, redactor: redactor)
     command = adapter.current_restore_command
 
-    assert_includes command.argv, "app_development"
-    refute_includes command.argv.join(" "), "secret"
+    assert_includes command.argv, 'app_development'
+    refute_includes command.argv.join(' '), 'secret'
     assert_equal(
       {
-        "PGHOST" => "db",
-        "PGUSER" => "app",
-        "PGPASSWORD" => "secret",
-        "PGDATABASE" => "app_development"
+        'PGHOST' => 'db',
+        'PGUSER' => 'app',
+        'PGPASSWORD' => 'secret',
+        'PGDATABASE' => 'app_development'
       },
       command.env
     )
@@ -66,117 +68,117 @@ class DatabaseAdaptersTest < Minitest::Test
 
   def test_postgres_scratch_restore_uses_the_requested_database
     config = KamalBackup::Config.new(env: base_env(
-      "DATABASE_ADAPTER" => "postgres",
-      "DATABASE_URL" => "postgres://app:secret@db/app_production"
+      'DATABASE_ADAPTER' => 'postgres',
+      'DATABASE_URL' => 'postgres://app:secret@db/app_production'
     ))
     adapter = KamalBackup::Databases::Postgres.new(config, redactor: redactor)
-    command = adapter.scratch_restore_command("app_restore_20260423")
+    command = adapter.scratch_restore_command('app_restore_20260423')
 
-    assert_includes command.argv, "app_restore_20260423"
-    assert_equal "app_restore_20260423", command.env.fetch("PGDATABASE")
+    assert_includes command.argv, 'app_restore_20260423'
+    assert_equal 'app_restore_20260423', command.env.fetch('PGDATABASE')
   end
 
   def test_postgres_scratch_restore_refuses_the_current_database
     config = KamalBackup::Config.new(env: base_env(
-      "DATABASE_ADAPTER" => "postgres",
-      "DATABASE_URL" => "postgres://app:secret@db/app"
+      'DATABASE_ADAPTER' => 'postgres',
+      'DATABASE_URL' => 'postgres://app:secret@db/app'
     ))
     adapter = KamalBackup::Databases::Postgres.new(config, redactor: redactor)
 
     error = assert_raises(KamalBackup::ConfigurationError) do
-      adapter.send(:validate_scratch_restore_target, "app")
+      adapter.send(:validate_scratch_restore_target, 'app')
     end
     assert_match(/scratch database must differ/, error.message)
   end
 
   def test_mysql_dump_command_uses_transaction_safe_options_and_password_env
     config = KamalBackup::Config.new(env: base_env(
-      "DATABASE_ADAPTER" => "mysql",
-      "DATABASE_URL" => "mysql2://app:secret@mysql:3306/app_test",
-      "MYSQL_DUMP_BIN" => "mysqldump"
+      'DATABASE_ADAPTER' => 'mysql',
+      'DATABASE_URL' => 'mysql2://app:secret@mysql:3306/app_test',
+      'MYSQL_DUMP_BIN' => 'mysqldump'
     ))
     adapter = KamalBackup::Databases::Mysql.new(config, redactor: redactor)
     command = adapter.dump_command
 
-    assert_equal "mysqldump", command.argv.first
-    assert_includes command.argv, "--single-transaction"
-    assert_includes command.argv, "--quick"
-    assert_includes command.argv, "--routines"
-    assert_includes command.argv, "--triggers"
-    assert_includes command.argv, "--events"
-    assert_includes command.argv, "app_test"
-    assert_equal({ "MYSQL_PWD" => "secret" }, command.env)
+    assert_equal 'mysqldump', command.argv.first
+    assert_includes command.argv, '--single-transaction'
+    assert_includes command.argv, '--quick'
+    assert_includes command.argv, '--routines'
+    assert_includes command.argv, '--triggers'
+    assert_includes command.argv, '--events'
+    assert_includes command.argv, 'app_test'
+    assert_equal({ 'MYSQL_PWD' => 'secret' }, command.env)
   end
 
   def test_mysql_current_restore_uses_current_database_url
     config = KamalBackup::Config.new(env: base_env(
-      "DATABASE_ADAPTER" => "mysql",
-      "DATABASE_URL" => "mysql2://app:secret@mysql:3306/app_development",
-      "MYSQL_CLIENT_BIN" => "mysql"
+      'DATABASE_ADAPTER' => 'mysql',
+      'DATABASE_URL' => 'mysql2://app:secret@mysql:3306/app_development',
+      'MYSQL_CLIENT_BIN' => 'mysql'
     ))
     adapter = KamalBackup::Databases::Mysql.new(config, redactor: redactor)
     command = adapter.current_restore_command
 
-    assert_equal "mysql", command.argv.first
-    assert_includes command.argv, "app_development"
-    assert_equal({ "MYSQL_PWD" => "secret" }, command.env)
+    assert_equal 'mysql', command.argv.first
+    assert_includes command.argv, 'app_development'
+    assert_equal({ 'MYSQL_PWD' => 'secret' }, command.env)
   end
 
   def test_mysql_scratch_restore_uses_the_requested_database
     config = KamalBackup::Config.new(env: base_env(
-      "DATABASE_ADAPTER" => "mysql",
-      "DATABASE_URL" => "mysql2://app:secret@mysql:3306/app_production",
-      "MYSQL_CLIENT_BIN" => "mysql"
+      'DATABASE_ADAPTER' => 'mysql',
+      'DATABASE_URL' => 'mysql2://app:secret@mysql:3306/app_production',
+      'MYSQL_CLIENT_BIN' => 'mysql'
     ))
     adapter = KamalBackup::Databases::Mysql.new(config, redactor: redactor)
-    command = adapter.scratch_restore_command("app_restore_20260423")
+    command = adapter.scratch_restore_command('app_restore_20260423')
 
-    assert_equal "mysql", command.argv.first
-    assert_includes command.argv, "app_restore_20260423"
-    assert_equal({ "MYSQL_PWD" => "secret" }, command.env)
+    assert_equal 'mysql', command.argv.first
+    assert_includes command.argv, 'app_restore_20260423'
+    assert_equal({ 'MYSQL_PWD' => 'secret' }, command.env)
   end
 
   def test_mysql_scratch_restore_refuses_the_current_database
     config = KamalBackup::Config.new(env: base_env(
-      "DATABASE_ADAPTER" => "mysql",
-      "DATABASE_URL" => "mysql2://app:secret@mysql:3306/app_production",
-      "MYSQL_CLIENT_BIN" => "mysql"
+      'DATABASE_ADAPTER' => 'mysql',
+      'DATABASE_URL' => 'mysql2://app:secret@mysql:3306/app_production',
+      'MYSQL_CLIENT_BIN' => 'mysql'
     ))
     adapter = KamalBackup::Databases::Mysql.new(config, redactor: redactor)
 
     error = assert_raises(KamalBackup::ConfigurationError) do
-      adapter.send(:validate_scratch_restore_target, "app_production")
+      adapter.send(:validate_scratch_restore_target, 'app_production')
     end
     assert_match(/scratch database must differ/, error.message)
   end
 
   def test_sqlite_current_restore_uses_the_configured_database_path
     config = KamalBackup::Config.new(env: base_env(
-      "DATABASE_ADAPTER" => "sqlite",
-      "SQLITE_DATABASE_PATH" => "/tmp/app_development.sqlite3"
+      'DATABASE_ADAPTER' => 'sqlite',
+      'SQLITE_DATABASE_PATH' => '/tmp/app_development.sqlite3'
     ))
     adapter = KamalBackup::Databases::Sqlite.new(config, redactor: redactor)
 
-    assert_equal "/tmp/app_development.sqlite3", adapter.current_target_identifier
+    assert_equal '/tmp/app_development.sqlite3', adapter.current_target_identifier
   end
 
   def test_sqlite_scratch_restore_refuses_the_current_database_path
     config = KamalBackup::Config.new(env: base_env(
-      "DATABASE_ADAPTER" => "sqlite",
-      "SQLITE_DATABASE_PATH" => "/tmp/app_development.sqlite3"
+      'DATABASE_ADAPTER' => 'sqlite',
+      'SQLITE_DATABASE_PATH' => '/tmp/app_development.sqlite3'
     ))
     adapter = KamalBackup::Databases::Sqlite.new(config, redactor: redactor)
 
     error = assert_raises(KamalBackup::ConfigurationError) do
-      adapter.send(:validate_scratch_restore_target, "/tmp/app_development.sqlite3")
+      adapter.send(:validate_scratch_restore_target, '/tmp/app_development.sqlite3')
     end
     assert_match(/scratch SQLite path must differ/, error.message)
   end
 
   def test_sqlite_literal_escapes_single_quotes
     config = KamalBackup::Config.new(env: base_env(
-      "DATABASE_ADAPTER" => "sqlite",
-      "SQLITE_DATABASE_PATH" => "/tmp/app.sqlite3"
+      'DATABASE_ADAPTER' => 'sqlite',
+      'SQLITE_DATABASE_PATH' => '/tmp/app.sqlite3'
     ))
     adapter = KamalBackup::Databases::Sqlite.new(config, redactor: redactor)
 

@@ -1,16 +1,17 @@
 #!/usr/bin/env ruby
+# frozen_string_literal: true
 
-root = File.expand_path("..", __dir__)
-gemfile = File.join(root, "Gemfile")
-libdir = File.join(root, "lib")
+root = File.expand_path('..', __dir__)
+gemfile = File.join(root, 'Gemfile')
+libdir = File.join(root, 'lib')
 
 $LOAD_PATH.unshift(libdir) if File.directory?(libdir) && !$LOAD_PATH.include?(libdir)
 
 if File.exist?(gemfile)
-  ENV["BUNDLE_GEMFILE"] ||= gemfile
-  require "bundler/setup"
+  ENV['BUNDLE_GEMFILE'] ||= gemfile
+  require 'bundler/setup'
 end
 
-require "kamal_backup"
+require 'kamal_backup'
 
 KamalBackup::CLI.start

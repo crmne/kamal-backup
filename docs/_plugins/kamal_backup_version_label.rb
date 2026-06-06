@@ -1,35 +1,35 @@
 # frozen_string_literal: true
 
-require "pathname"
+require 'pathname'
 
 module KamalBackupDocs
   module VersionLabel
     module_function
 
     AUTO_VALUES = %w[auto kamal_backup_auto].freeze
-    VERSION_FILE = "lib/kamal_backup/version.rb"
+    VERSION_FILE = 'lib/kamal_backup/version.rb'
 
     def apply(site)
-      versions = site.data["versions"]
+      versions = site.data['versions']
       return unless versions.is_a?(Hash)
 
-      current = versions["current"] || versions[:current]
+      current = versions['current'] || versions[:current]
       return unless auto_value?(current)
 
       resolved = resolve_version(site)
       return unless resolved
 
       resolved_label = "v#{resolved}"
-      versions["current"] = resolved_label
+      versions['current'] = resolved_label
       versions[:current] = resolved_label if versions.key?(:current)
 
-      items = versions["items"] || versions[:items]
+      items = versions['items'] || versions[:items]
       return unless items.is_a?(Array) && items.first.is_a?(Hash)
 
-      items.first["title"] = "#{resolved_label} (current)"
-      items.first["url"] = "/" if items.first["url"].to_s.strip.empty?
+      items.first['title'] = "#{resolved_label} (current)"
+      items.first['url'] = '/' if items.first['url'].to_s.strip.empty?
     rescue StandardError => e
-      Jekyll.logger.warn("kamal-backup-version", "Unable to resolve version: #{e.message}")
+      Jekyll.logger.warn('kamal-backup-version', "Unable to resolve version: #{e.message}")
     end
 
     def auto_value?(value)
@@ -62,10 +62,10 @@ module KamalBackupDocs
 
     def candidate_version_files(site)
       roots = []
-      configured_root = site.config["kamal_backup_root"]
+      configured_root = site.config['kamal_backup_root']
       roots << Pathname.new(configured_root) if configured_root && !configured_root.to_s.strip.empty?
 
-      env_root = ENV["KAMAL_BACKUP_ROOT"]
+      env_root = ENV['KAMAL_BACKUP_ROOT']
       roots << Pathname.new(env_root) if env_root && !env_root.strip.empty?
 
       cursor = Pathname.new(site.source).expand_path
@@ -83,7 +83,7 @@ module KamalBackupDocs
       version = value.to_s.strip
       return nil if version.empty?
 
-      version.sub(/\Av/i, "")
+      version.sub(/\Av/i, '')
     end
   end
 end

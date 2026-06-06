@@ -1,16 +1,18 @@
-require_relative "../command"
-require_relative "../errors"
+# frozen_string_literal: true
+
+require_relative '../command'
+require_relative '../errors'
 
 module KamalBackup
   module Databases
     class Base
       def self.build(config, redactor:)
         case config.database_adapter
-        when "postgres"
+        when 'postgres'
           Postgres.new(config, redactor: redactor)
-        when "mysql"
+        when 'mysql'
           Mysql.new(config, redactor: redactor)
-        when "sqlite"
+        when 'sqlite'
           Sqlite.new(config, redactor: redactor)
         else
           raise ConfigurationError, "unsupported DATABASE_ADAPTER: #{config.database_adapter.inspect}"
@@ -42,13 +44,13 @@ module KamalBackup
       end
 
       def database_filename
-        app = config.app_name.gsub(/[^A-Za-z0-9_.-]+/, "-")
-        database = config.database_name.gsub(/[^A-Za-z0-9_.-]+/, "-")
+        app = config.app_name.gsub(/[^A-Za-z0-9_.-]+/, '-')
+        database = config.database_name.gsub(/[^A-Za-z0-9_.-]+/, '-')
         "databases/#{app}/#{database}/#{adapter_name}.#{dump_extension}"
       end
 
       def backup_tags
-        ["type:database", "database:#{config.database_name}", "adapter:#{adapter_name}"]
+        ['type:database', "database:#{config.database_name}", "adapter:#{adapter_name}"]
       end
 
       def adapter_name
@@ -84,13 +86,14 @@ module KamalBackup
       end
 
       private
-        def value(key)
-          config.value(key)
-        end
 
-        def executable_available?(name)
-          Command.available?(name)
-        end
+      def value(key)
+        config.value(key)
+      end
+
+      def executable_available?(name)
+        Command.available?(name)
+      end
     end
   end
 end

@@ -1,4 +1,6 @@
-require_relative "test_helper"
+# frozen_string_literal: true
+
+require_relative 'test_helper'
 
 class ResticTest < Minitest::Test
   class FakeRestic < KamalBackup::Restic
@@ -10,16 +12,15 @@ class ResticTest < Minitest::Test
       @calls = []
     end
 
-    def run(args, log_output: true)
+    def run(args, **)
       @last_args = args
       @calls << args
-      KamalBackup::CommandResult.new(stdout: @json, stderr: "", status: 0)
+      KamalBackup::CommandResult.new(stdout: @json, stderr: '', status: 0)
     end
 
     private
 
-    def log(_message)
-    end
+    def log(_message); end
   end
 
   class CapturingPipeRestic < KamalBackup::Restic
@@ -27,47 +28,46 @@ class ResticTest < Minitest::Test
 
     private
 
-    def pipe_commands(_producer, consumer, producer_label:, consumer_label:)
+    def pipe_commands(_producer, consumer, **)
       @consumer_argv = consumer.argv
-      KamalBackup::CommandResult.new(stdout: "", stderr: "", status: 0)
+      KamalBackup::CommandResult.new(stdout: '', stderr: '', status: 0)
     end
 
-    def log(_message)
-    end
+    def log(_message); end
   end
 
   def test_snapshots_json_requires_all_requested_tags
-    config = KamalBackup::Config.new(env: base_env("APP_NAME" => "demo"))
+    config = KamalBackup::Config.new(env: base_env('APP_NAME' => 'demo'))
     json = [
-      { "short_id" => "db", "tags" => ["kamal-backup", "app:demo", "type:database"] },
-      { "short_id" => "files", "tags" => ["kamal-backup", "app:demo", "type:files"] },
-      { "short_id" => "other", "tags" => ["kamal-backup", "app:other", "type:database"] }
+      { 'short_id' => 'db', 'tags' => ['kamal-backup', 'app:demo', 'type:database'] },
+      { 'short_id' => 'files', 'tags' => ['kamal-backup', 'app:demo', 'type:files'] },
+      { 'short_id' => 'other', 'tags' => ['kamal-backup', 'app:other', 'type:database'] }
     ].to_json
     restic = FakeRestic.new(config, json)
 
-    snapshots = restic.snapshots_json(tags: ["kamal-backup", "app:demo", "type:database"])
+    snapshots = restic.snapshots_json(tags: ['kamal-backup', 'app:demo', 'type:database'])
 
-    assert_equal ["db"], snapshots.map { |snapshot| snapshot["short_id"] }
+    assert_equal(['db'], snapshots.map { |snapshot| snapshot['short_id'] })
   end
 
   def test_backup_paths_adds_each_path_label_as_a_tag_and_uses_stable_host
-    config = KamalBackup::Config.new(env: base_env("APP_NAME" => "demo"))
-    restic = FakeRestic.new(config, "[]")
+    config = KamalBackup::Config.new(env: base_env('APP_NAME' => 'demo'))
+    restic = FakeRestic.new(config, '[]')
 
-    restic.backup_paths(["/data/storage", "/data/uploads"], tags: ["type:files"])
+    restic.backup_paths(['/data/storage', '/data/uploads'], tags: ['type:files'])
 
-    assert_equal ["backup", "--host", "demo-backup", "/data/storage", "/data/uploads"], restic.last_args.first(5)
-    assert_includes restic.last_args, "--tag"
-    assert_includes restic.last_args, "path:data-storage"
-    assert_includes restic.last_args, "path:data-uploads"
+    assert_equal ['backup', '--host', 'demo-backup', '/data/storage', '/data/uploads'], restic.last_args.first(5)
+    assert_includes restic.last_args, '--tag'
+    assert_includes restic.last_args, 'path:data-storage'
+    assert_includes restic.last_args, 'path:data-uploads'
   end
 
   def test_backup_paths_passes_configured_excludes_to_restic
     Dir.mktmpdir do |dir|
-      config_dir = File.join(dir, "config")
+      config_dir = File.join(dir, 'config')
       FileUtils.mkdir_p(config_dir)
       File.write(
-        File.join(config_dir, "kamal-backup.yml"),
+        File.join(config_dir, 'kamal-backup.yml'),
         <<~YAML
           app: demo
           databases:
@@ -86,139 +86,140 @@ class ResticTest < Minitest::Test
         YAML
       )
       config = KamalBackup::Config.new(env: {}, cwd: dir, load_project_defaults: false)
-      restic = FakeRestic.new(config, "[]")
+      restic = FakeRestic.new(config, '[]')
 
-      restic.backup_paths(config.backup_paths, tags: ["type:files"])
+      restic.backup_paths(config.backup_paths, tags: ['type:files'])
 
-      exclude_pairs = restic.last_args.each_cons(2).select { |flag, _pattern| flag == "--exclude" }
+      exclude_pairs = restic.last_args.each_cons(2).select { |flag, _pattern| flag == '--exclude' }
       assert_equal [
-        ["--exclude", "/rails/storage/*.sqlite3"],
-        ["--exclude", "/rails/storage/*.sqlite3-wal"],
-        ["--exclude", "/rails/storage/*.sqlite3-shm"]
+        ['--exclude', '/rails/storage/*.sqlite3'],
+        ['--exclude', '/rails/storage/*.sqlite3-wal'],
+        ['--exclude', '/rails/storage/*.sqlite3-shm']
       ], exclude_pairs
     end
   end
 
   def test_backup_paths_passes_automatic_sqlite_excludes_to_restic
     config = KamalBackup::Config.new(env: base_env(
-      "APP_NAME" => "demo",
-      "DATABASE_ADAPTER" => "sqlite",
-      "SQLITE_DATABASE_PATH" => "/data/storage/production.sqlite3",
-      "BACKUP_PATHS" => "/data/storage"
+      'APP_NAME' => 'demo',
+      'DATABASE_ADAPTER' => 'sqlite',
+      'SQLITE_DATABASE_PATH' => '/data/storage/production.sqlite3',
+      'BACKUP_PATHS' => '/data/storage'
     ))
-    restic = FakeRestic.new(config, "[]")
+    restic = FakeRestic.new(config, '[]')
 
-    restic.backup_paths(config.backup_paths, tags: ["type:files"])
+    restic.backup_paths(config.backup_paths, tags: ['type:files'])
 
-    exclude_pairs = restic.last_args.each_cons(2).select { |flag, _pattern| flag == "--exclude" }
+    exclude_pairs = restic.last_args.each_cons(2).select { |flag, _pattern| flag == '--exclude' }
     assert_equal [
-      ["--exclude", "/data/storage/production.sqlite3"],
-      ["--exclude", "/data/storage/production.sqlite3-wal"],
-      ["--exclude", "/data/storage/production.sqlite3-shm"]
+      ['--exclude', '/data/storage/production.sqlite3'],
+      ['--exclude', '/data/storage/production.sqlite3-wal'],
+      ['--exclude', '/data/storage/production.sqlite3-shm']
     ], exclude_pairs
   end
 
   def test_backup_stream_does_not_apply_file_backup_excludes
     config = KamalBackup::Config.new(env: base_env(
-      "APP_NAME" => "demo",
-      "DATABASE_ADAPTER" => "sqlite",
-      "SQLITE_DATABASE_PATH" => "/data/storage/production.sqlite3",
-      "BACKUP_PATHS" => "/data/storage"
+      'APP_NAME' => 'demo',
+      'DATABASE_ADAPTER' => 'sqlite',
+      'SQLITE_DATABASE_PATH' => '/data/storage/production.sqlite3',
+      'BACKUP_PATHS' => '/data/storage'
     ))
     restic = CapturingPipeRestic.new(config, redactor: KamalBackup::Redactor.new(env: {}))
-    dump_command = KamalBackup::CommandSpec.new(argv: ["sqlite3", "/data/storage/production.sqlite3", ".dump"], env: {})
+    dump_command = KamalBackup::CommandSpec.new(argv: ['sqlite3', '/data/storage/production.sqlite3', '.dump'], env: {})
 
-    restic.backup_stream(dump_command, filename: "databases/demo/app/sqlite.sqlite3", tags: ["type:database"])
+    restic.backup_stream(dump_command, filename: 'databases/demo/app/sqlite.sqlite3', tags: ['type:database'])
 
-    refute_includes restic.consumer_argv, "--exclude"
+    refute_includes restic.consumer_argv, '--exclude'
   end
 
   def test_backup_file_reports_restic_stderr_when_stdin_pipe_closes
     Dir.mktmpdir do |dir|
-      bin_dir = File.join(dir, "bin")
+      bin_dir = File.join(dir, 'bin')
       FileUtils.mkdir_p(bin_dir)
-      fake_restic = File.join(bin_dir, "restic")
+      fake_restic = File.join(bin_dir, 'restic')
       File.write(fake_restic, "#!/bin/sh\necho restic exploded >&2\nexit 12\n")
-      FileUtils.chmod("+x", fake_restic)
+      FileUtils.chmod('+x', fake_restic)
 
-      path = File.join(dir, "large.sqlite3")
-      File.binwrite(path, "x" * (16 * 1024 * 1024))
-      config = KamalBackup::Config.new(env: base_env("APP_NAME" => "demo"))
+      path = File.join(dir, 'large.sqlite3')
+      File.binwrite(path, 'x' * (16 * 1024 * 1024))
+      config = KamalBackup::Config.new(env: base_env('APP_NAME' => 'demo'))
       restic = KamalBackup::Restic.new(config, redactor: KamalBackup::Redactor.new(env: {}))
-      previous_path = ENV["PATH"]
-      ENV["PATH"] = "#{bin_dir}#{File::PATH_SEPARATOR}#{previous_path}"
+      previous_path = ENV['PATH']
+      ENV['PATH'] = "#{bin_dir}#{File::PATH_SEPARATOR}#{previous_path}"
 
       error = assert_raises(KamalBackup::CommandError) do
-        restic.backup_file(path, filename: "databases/demo/app/sqlite.sqlite3", tags: ["type:database"])
+        restic.backup_file(path, filename: 'databases/demo/app/sqlite.sqlite3', tags: ['type:database'])
       end
 
       assert_equal 12, error.status
-      assert_includes error.stderr, "restic exploded"
-      assert_includes error.message, "restic exploded"
+      assert_includes error.stderr, 'restic exploded'
+      assert_includes error.message, 'restic exploded'
     ensure
-      ENV["PATH"] = previous_path if previous_path
+      ENV['PATH'] = previous_path if previous_path
     end
   end
 
   def test_database_file_finds_stable_and_legacy_dump_paths
-    config = KamalBackup::Config.new(env: base_env("APP_NAME" => "demo"))
+    config = KamalBackup::Config.new(env: base_env('APP_NAME' => 'demo'))
     json = [
-      { "type" => "file", "path" => "/databases/demo/app/postgres.pgdump" },
-      { "type" => "file", "path" => "/databases-demo-app-postgres-20260422T120000Z.pgdump" }
+      { 'type' => 'file', 'path' => '/databases/demo/app/postgres.pgdump' },
+      { 'type' => 'file', 'path' => '/databases-demo-app-postgres-20260422T120000Z.pgdump' }
     ].map(&:to_json).join("\n")
     restic = FakeRestic.new(config, json)
 
-    assert_equal "/databases/demo/app/postgres.pgdump", restic.database_file("snapshot", "postgres", database_name: "app")
+    assert_equal '/databases/demo/app/postgres.pgdump',
+                 restic.database_file('snapshot', 'postgres', database_name: 'app')
   end
 
   def test_forget_after_success_groups_database_snapshots_by_host
     config = KamalBackup::Config.new(env: base_env(
-      "APP_NAME" => "demo",
-      "DATABASE_ADAPTER" => "sqlite",
-      "SQLITE_DATABASE_PATH" => "/tmp/demo.sqlite3",
-      "BACKUP_PATHS" => "",
-      "RESTIC_KEEP_LAST" => "2"
+      'APP_NAME' => 'demo',
+      'DATABASE_ADAPTER' => 'sqlite',
+      'SQLITE_DATABASE_PATH' => '/tmp/demo.sqlite3',
+      'BACKUP_PATHS' => '',
+      'RESTIC_KEEP_LAST' => '2'
     ))
-    restic = FakeRestic.new(config, "[]")
+    restic = FakeRestic.new(config, '[]')
 
     restic.forget_after_success
 
     assert_equal 1, restic.calls.size
     args = restic.last_args
-    assert_equal ["forget", "--prune", "--group-by", "host"], args.first(4)
-    assert_includes args, "--keep-last"
-    assert_includes args, "2"
-    assert_includes args, "--tag"
-    assert_includes args, "kamal-backup,app:demo,type:database,adapter:sqlite"
-    refute_includes args, "host,tags"
+    assert_equal ['forget', '--prune', '--group-by', 'host'], args.first(4)
+    assert_includes args, '--keep-last'
+    assert_includes args, '2'
+    assert_includes args, '--tag'
+    assert_includes args, 'kamal-backup,app:demo,type:database,adapter:sqlite'
+    refute_includes args, 'host,tags'
   end
 
   def test_forget_after_success_scopes_database_and_file_retention_separately
     config = KamalBackup::Config.new(env: base_env(
-      "APP_NAME" => "demo",
-      "DATABASE_ADAPTER" => "sqlite",
-      "SQLITE_DATABASE_PATH" => "/tmp/demo.sqlite3",
-      "BACKUP_PATHS" => "/data/storage"
+      'APP_NAME' => 'demo',
+      'DATABASE_ADAPTER' => 'sqlite',
+      'SQLITE_DATABASE_PATH' => '/tmp/demo.sqlite3',
+      'BACKUP_PATHS' => '/data/storage'
     ))
-    restic = FakeRestic.new(config, "[]")
+    restic = FakeRestic.new(config, '[]')
 
     restic.forget_after_success
 
     tag_filters = restic.calls.filter_map do |args|
-      tag_index = args.index("--tag")
+      tag_index = args.index('--tag')
       args[tag_index + 1] if tag_index
     end
     assert_equal 2, restic.calls.size
-    assert_includes tag_filters, "kamal-backup,app:demo,type:database,adapter:sqlite"
-    assert_includes tag_filters, "kamal-backup,app:demo,type:files"
+    assert_includes tag_filters, 'kamal-backup,app:demo,type:database,adapter:sqlite'
+    assert_includes tag_filters, 'kamal-backup,app:demo,type:files'
   end
 
   def test_forget_after_success_keeps_same_adapter_databases_in_separate_retention_groups
     Dir.mktmpdir do |dir|
-      config_dir = File.join(dir, "config")
+      config_dir = File.join(dir, 'config')
       FileUtils.mkdir_p(config_dir)
       File.write(
-        File.join(config_dir, "kamal-backup.yml"),
+        File.join(config_dir, 'kamal-backup.yml'),
         <<~YAML
           app: demo
           databases:
@@ -234,36 +235,36 @@ class ResticTest < Minitest::Test
         YAML
       )
       config = KamalBackup::Config.new(env: {}, cwd: dir, load_project_defaults: false)
-      restic = FakeRestic.new(config, "[]")
+      restic = FakeRestic.new(config, '[]')
 
       restic.forget_after_success
 
       tag_filters = restic.calls.filter_map do |args|
-        tag_index = args.index("--tag")
+        tag_index = args.index('--tag')
         args[tag_index + 1] if tag_index
       end
       assert_equal 2, restic.calls.size
-      assert_includes tag_filters, "kamal-backup,app:demo,type:database,database:app,adapter:postgres"
-      assert_includes tag_filters, "kamal-backup,app:demo,type:database,database:queue,adapter:postgres"
-      refute_includes tag_filters, "kamal-backup,app:demo,type:database,adapter:postgres"
+      assert_includes tag_filters, 'kamal-backup,app:demo,type:database,database:app,adapter:postgres'
+      assert_includes tag_filters, 'kamal-backup,app:demo,type:database,database:queue,adapter:postgres'
+      refute_includes tag_filters, 'kamal-backup,app:demo,type:database,adapter:postgres'
     end
   end
 
   def test_snapshots_uses_one_filter_that_requires_all_tags
-    config = KamalBackup::Config.new(env: base_env("APP_NAME" => "demo"))
-    restic = FakeRestic.new(config, "[]")
+    config = KamalBackup::Config.new(env: base_env('APP_NAME' => 'demo'))
+    restic = FakeRestic.new(config, '[]')
 
-    restic.snapshots(tags: ["kamal-backup", "app:demo"])
+    restic.snapshots(tags: ['kamal-backup', 'app:demo'])
 
-    assert_equal ["snapshots", "--tag", "kamal-backup,app:demo"], restic.last_args
+    assert_equal ['snapshots', '--tag', 'kamal-backup,app:demo'], restic.last_args
   end
 
   def test_restic_env_includes_yaml_restic_settings
     Dir.mktmpdir do |dir|
-      config_dir = File.join(dir, "config")
+      config_dir = File.join(dir, 'config')
       FileUtils.mkdir_p(config_dir)
       File.write(
-        File.join(config_dir, "kamal-backup.yml"),
+        File.join(config_dir, 'kamal-backup.yml'),
         <<~YAML
           app: demo
           restic:
@@ -276,17 +277,17 @@ class ResticTest < Minitest::Test
       restic = KamalBackup::Restic.new(config, redactor: KamalBackup::Redactor.new(env: config.env))
       restic_env = restic.send(:restic_env)
 
-      assert_equal "s3:https://s3.example.com/demo", restic_env.fetch("RESTIC_REPOSITORY")
-      assert_equal "yaml-secret", restic_env.fetch("RESTIC_PASSWORD")
+      assert_equal 's3:https://s3.example.com/demo', restic_env.fetch('RESTIC_REPOSITORY')
+      assert_equal 'yaml-secret', restic_env.fetch('RESTIC_PASSWORD')
     end
   end
 
   def test_restic_env_includes_yaml_rest_backend_credentials
     Dir.mktmpdir do |dir|
-      config_dir = File.join(dir, "config")
+      config_dir = File.join(dir, 'config')
       FileUtils.mkdir_p(config_dir)
       File.write(
-        File.join(config_dir, "kamal-backup.yml"),
+        File.join(config_dir, 'kamal-backup.yml'),
         <<~YAML
           app: demo
           restic:
@@ -302,8 +303,8 @@ class ResticTest < Minitest::Test
 
       config = KamalBackup::Config.new(
         env: {
-          "RESTIC_REST_USER" => "backup",
-          "RESTIC_REST_PASSWORD" => "rest-secret"
+          'RESTIC_REST_USER' => 'backup',
+          'RESTIC_REST_PASSWORD' => 'rest-secret'
         },
         cwd: dir,
         load_project_defaults: false
@@ -311,9 +312,9 @@ class ResticTest < Minitest::Test
       restic = KamalBackup::Restic.new(config, redactor: KamalBackup::Redactor.new(env: config.env))
       restic_env = restic.send(:restic_env)
 
-      assert_equal "rest:https://backup.example.com/prod", restic_env.fetch("RESTIC_REPOSITORY")
-      assert_equal "backup", restic_env.fetch("RESTIC_REST_USERNAME")
-      assert_equal "rest-secret", restic_env.fetch("RESTIC_REST_PASSWORD")
+      assert_equal 'rest:https://backup.example.com/prod', restic_env.fetch('RESTIC_REPOSITORY')
+      assert_equal 'backup', restic_env.fetch('RESTIC_REST_USERNAME')
+      assert_equal 'rest-secret', restic_env.fetch('RESTIC_REST_PASSWORD')
     end
   end
 end

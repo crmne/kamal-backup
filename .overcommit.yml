@@ -1,0 +1,98 @@
+# Use this file to configure the Overcommit hooks you wish to use. This will
+# extend the default configuration defined in:
+# https://github.com/sds/overcommit/blob/master/config/default.yml
+#
+# At the topmost level of this YAML file is a key representing type of hook
+# being run (e.g. pre-commit, commit-msg, etc.). Within each type you can
+# customize each hook, such as whether to only run it on certain files (via
+# `include`), whether to only display output if it fails (via `quiet`), etc.
+#
+# For a complete list of hooks, see:
+# https://github.com/sds/overcommit/tree/master/lib/overcommit/hook
+#
+# For a complete list of options that you can use to customize hooks, see:
+# https://github.com/sds/overcommit#configuration
+#
+# Uncomment the following lines to make the configuration take effect.
+
+PreCommit:
+  BundleCheck:
+    enabled: true
+
+  BundleOutdated:
+    enabled: true
+
+  ChamberCompare:
+    enabled: true
+
+  ChamberSecurity:
+    enabled: true
+
+  Flay:
+    enabled: true
+    mass_threshold: 150
+    exclude:
+      - 'test/**/*'
+
+  FileSize:
+    enabled: false
+
+  ImageOptim:
+    enabled: false
+    flags: ['--config-paths', 'config/image_optim.yml']
+
+  JShint:
+    enabled: false
+
+  LocalPathsInGemfile:
+    enabled: true
+
+  RailsBestPractices:
+    enabled: false
+    flags: ['-c', 'config/rails_best_practices.yml']
+
+  RailsSchemaUpToDate:
+    enabled: true
+
+  RuboCop:
+    enabled: true
+    auto_correct: true
+    on_warn: fail # Treat all warnings as failures
+    include:
+      - '**/*.rb'
+      - '**/*.rake'
+      - '**/Gemfile'
+      - '**/Rakefile'
+
+  RubySyntax:
+    enabled: true
+
+  TrailingWhitespace:
+    enabled: true
+    auto_correct: true
+    exclude:
+      - 'node_modules/**/*' # Ignore trailing whitespace in node_modules
+      - '**/db/structure.sql' # Ignore trailing whitespace in generated files
+
+PrePush:
+  Brakeman:
+    enabled: true
+
+  Minitest:
+    enabled: true
+
+  GitLfs:
+    enabled: true
+    required_executable: 'git-lfs'
+    flags: ['pre-push']
+
+  SystemTests:
+    enabled: true
+    command: ['sh', '-c', 'RAILS_ENV=test bundle exec rails db:test:prepare && PARALLEL_WORKERS=1 RAILS_ENV=test bundle exec rails test:system']
+
+PostCheckout:
+  ALL: # Special hook name that customizes all hooks of this type
+    quiet: true # Change all post-checkout hooks to only display output on failure
+
+  IndexTags:
+    enabled: true # Generate a tags file with `ctags` each time HEAD changes

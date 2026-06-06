@@ -1,24 +1,26 @@
-require "fileutils"
-require "tempfile"
-require_relative "base"
+# frozen_string_literal: true
+
+require 'fileutils'
+require 'tempfile'
+require_relative 'base'
 
 module KamalBackup
   module Databases
     class Sqlite < Base
       def adapter_name
-        "sqlite"
+        'sqlite'
       end
 
       def dump_extension
-        "sqlite3"
+        'sqlite3'
       end
 
       def backup(restic)
         source = sqlite_source
-        Tempfile.create(["kamal-backup-", ".sqlite3"]) do |tempfile|
+        Tempfile.create(['kamal-backup-', '.sqlite3']) do |tempfile|
           tempfile.close
           Command.capture(
-            CommandSpec.new(argv: ["sqlite3", source, ".backup #{sqlite_literal(tempfile.path)}"]),
+            CommandSpec.new(argv: ['sqlite3', source, ".backup #{sqlite_literal(tempfile.path)}"]),
             redactor: redactor
           )
           restic.backup_file(
@@ -39,7 +41,7 @@ module KamalBackup
       end
 
       def dump_command
-        raise NotImplementedError, "SQLite backup uses .backup into a temporary file"
+        raise NotImplementedError, 'SQLite backup uses .backup into a temporary file'
       end
 
       def current_target_identifier
@@ -51,21 +53,20 @@ module KamalBackup
       end
 
       private
-        def sqlite_source
-          config.required_value("SQLITE_DATABASE_PATH")
-        end
 
-        def validate_scratch_restore_target(target)
-          if File.expand_path(sqlite_source) == File.expand_path(target)
-            raise ConfigurationError, "scratch SQLite path must differ from SQLITE_DATABASE_PATH"
-          end
+      def sqlite_source
+        config.required_value('SQLITE_DATABASE_PATH')
+      end
 
-          super
-        end
+      def validate_scratch_restore_target(target)
+        raise ConfigurationError, 'scratch SQLite path must differ from SQLITE_DATABASE_PATH' if File.expand_path(sqlite_source) == File.expand_path(target)
 
-        def sqlite_literal(value)
-          "'#{value.to_s.gsub("'", "''")}'"
-        end
+        super
+      end
+
+      def sqlite_literal(value)
+        "'#{value.to_s.gsub("'", "''")}'"
+      end
     end
   end
 end

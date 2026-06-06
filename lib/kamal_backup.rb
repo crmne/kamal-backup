@@ -1,17 +1,19 @@
-require_relative "kamal_backup/version"
-require_relative "kamal_backup/schema"
-require_relative "kamal_backup/errors"
-require_relative "kamal_backup/command"
-require_relative "kamal_backup/redactor"
-require_relative "kamal_backup/config"
-require_relative "kamal_backup/rails_app"
-require_relative "kamal_backup/kamal_bridge"
-require_relative "kamal_backup/restic"
-require_relative "kamal_backup/evidence"
-require_relative "kamal_backup/scheduler"
-require_relative "kamal_backup/databases/base"
-require_relative "kamal_backup/databases/postgres"
-require_relative "kamal_backup/databases/mysql"
-require_relative "kamal_backup/databases/sqlite"
-require_relative "kamal_backup/app"
-require_relative "kamal_backup/cli"
+# frozen_string_literal: true
+
+require_relative 'kamal_backup/version'
+require_relative 'kamal_backup/schema'
+require_relative 'kamal_backup/errors'
+require_relative 'kamal_backup/command'
+require_relative 'kamal_backup/redactor'
+require_relative 'kamal_backup/config'
+require_relative 'kamal_backup/rails_app'
+require_relative 'kamal_backup/kamal_bridge'
+require_relative 'kamal_backup/restic'
+require_relative 'kamal_backup/evidence'
+require_relative 'kamal_backup/scheduler'
+require_relative 'kamal_backup/databases/base'
+require_relative 'kamal_backup/databases/postgres'
+require_relative 'kamal_backup/databases/mysql'
+require_relative 'kamal_backup/databases/sqlite'
+require_relative 'kamal_backup/app'
+require_relative 'kamal_backup/cli'

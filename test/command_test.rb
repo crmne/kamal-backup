@@ -1,124 +1,126 @@
-require_relative "test_helper"
-require "stringio"
+# frozen_string_literal: true
+
+require_relative 'test_helper'
+require 'stringio'
 
 class CommandTest < Minitest::Test
   def test_command_spec_redacts_display
     spec = KamalBackup::CommandSpec.new(
-      argv: ["pg_dump", "postgres://app:secret@db/app"],
+      argv: ['pg_dump', 'postgres://app:secret@db/app'],
       env: {
-        "PGPASSWORD" => "secret",
-        "RESTIC_REST_USERNAME" => "backup",
-        "RESTIC_CHECK_AFTER_BACKUP" => "true"
+        'PGPASSWORD' => 'secret',
+        'RESTIC_REST_USERNAME' => 'backup',
+        'RESTIC_CHECK_AFTER_BACKUP' => 'true'
       }
     )
-    redactor = KamalBackup::Redactor.new(env: { "PGPASSWORD" => "secret" })
+    redactor = KamalBackup::Redactor.new(env: { 'PGPASSWORD' => 'secret' })
 
     display = spec.display(redactor)
 
-    assert_includes display, "RESTIC_CHECK_AFTER_BACKUP=true"
-    assert_includes display, "PGPASSWORD=[REDACTED]"
-    assert_includes display, "RESTIC_REST_USERNAME=[REDACTED]"
-    assert_includes display, "postgres://[REDACTED]@db/app"
-    refute_includes display, "secret"
-    refute_includes display, "backup"
+    assert_includes display, 'RESTIC_CHECK_AFTER_BACKUP=true'
+    assert_includes display, 'PGPASSWORD=[REDACTED]'
+    assert_includes display, 'RESTIC_REST_USERNAME=[REDACTED]'
+    assert_includes display, 'postgres://[REDACTED]@db/app'
+    refute_includes display, 'secret'
+    refute_includes display, 'backup'
   end
 
   def test_capture_returns_stdout
-    spec = KamalBackup::CommandSpec.new(argv: [RbConfig.ruby, "-e", "print 'ok'"])
+    spec = KamalBackup::CommandSpec.new(argv: [RbConfig.ruby, '-e', "print 'ok'"])
 
     result = KamalBackup::Command.capture(spec, redactor: KamalBackup::Redactor.new(env: {}))
 
-    assert_equal "ok", result.stdout
+    assert_equal 'ok', result.stdout
     assert_equal 0, result.status
   end
 
   def test_capture_pty_streams_redacted_output
     out = StringIO.new
-    redactor = KamalBackup::Redactor.new(env: { "RESTIC_PASSWORD" => "supersecret123" })
+    redactor = KamalBackup::Redactor.new(env: { 'RESTIC_PASSWORD' => 'supersecret123' })
     spec = KamalBackup::CommandSpec.new(
-      argv: [RbConfig.ruby, "-e", "puts ENV.fetch('RESTIC_PASSWORD')"],
-      env: { "RESTIC_PASSWORD" => "supersecret123" }
+      argv: [RbConfig.ruby, '-e', "puts ENV.fetch('RESTIC_PASSWORD')"],
+      env: { 'RESTIC_PASSWORD' => 'supersecret123' }
     )
 
     result = KamalBackup::Command.capture_pty(spec, redactor: redactor, tee_stdout: out)
 
     assert result.streamed
-    assert_includes result.stdout, "supersecret123"
-    assert_includes out.string, "[REDACTED]"
-    refute_includes out.string, "supersecret123"
+    assert_includes result.stdout, 'supersecret123'
+    assert_includes out.string, '[REDACTED]'
+    refute_includes out.string, 'supersecret123'
   end
 
   def test_capture_pty_includes_output_on_failure
-    spec = KamalBackup::CommandSpec.new(argv: [RbConfig.ruby, "-e", "puts 'pty boom'; exit 1"])
+    spec = KamalBackup::CommandSpec.new(argv: [RbConfig.ruby, '-e', "puts 'pty boom'; exit 1"])
 
     error = assert_raises(KamalBackup::CommandError) do
       KamalBackup::Command.capture_pty(spec, redactor: KamalBackup::Redactor.new(env: {}))
     end
 
     assert_equal 1, error.status
-    assert_includes error.stderr, "pty boom"
-    assert_includes error.message, "pty boom"
+    assert_includes error.stderr, 'pty boom'
+    assert_includes error.message, 'pty boom'
   end
 
   def test_capture_raises_command_error_on_failure
-    spec = KamalBackup::CommandSpec.new(argv: [RbConfig.ruby, "-e", "warn 'boom'; exit 1"])
+    spec = KamalBackup::CommandSpec.new(argv: [RbConfig.ruby, '-e', "warn 'boom'; exit 1"])
 
     error = assert_raises(KamalBackup::CommandError) do
       KamalBackup::Command.capture(spec, redactor: KamalBackup::Redactor.new(env: {}))
     end
 
     assert_equal 1, error.status
-    assert_includes error.stderr, "boom"
-    assert_includes error.message, "command failed (1)"
+    assert_includes error.stderr, 'boom'
+    assert_includes error.message, 'command failed (1)'
   end
 
   def test_capture_raises_command_error_for_missing_binary
-    spec = KamalBackup::CommandSpec.new(argv: ["nonexistent_binary_xyz_12345"])
+    spec = KamalBackup::CommandSpec.new(argv: ['nonexistent_binary_xyz_12345'])
 
     error = assert_raises(KamalBackup::CommandError) do
       KamalBackup::Command.capture(spec, redactor: KamalBackup::Redactor.new(env: {}))
     end
 
     assert_equal 127, error.status
-    assert_includes error.message, "command not found"
+    assert_includes error.message, 'command not found'
   end
 
   def test_capture_returns_stderr_on_success
-    spec = KamalBackup::CommandSpec.new(argv: [RbConfig.ruby, "-e", "print 'out'; $stderr.print 'err'"])
+    spec = KamalBackup::CommandSpec.new(argv: [RbConfig.ruby, '-e', "print 'out'; $stderr.print 'err'"])
 
     result = KamalBackup::Command.capture(spec, redactor: KamalBackup::Redactor.new(env: {}))
 
-    assert_equal "out", result.stdout
-    assert_equal "err", result.stderr
+    assert_equal 'out', result.stdout
+    assert_equal 'err', result.stderr
     assert_equal 0, result.status
   end
 
   def test_capture_passes_env_to_command
     spec = KamalBackup::CommandSpec.new(
-      argv: [RbConfig.ruby, "-e", "print ENV['TEST_KAMAL_VAR']"],
-      env: { "TEST_KAMAL_VAR" => "hello" }
+      argv: [RbConfig.ruby, '-e', "print ENV['TEST_KAMAL_VAR']"],
+      env: { 'TEST_KAMAL_VAR' => 'hello' }
     )
 
     result = KamalBackup::Command.capture(spec, redactor: KamalBackup::Redactor.new(env: {}))
 
-    assert_equal "hello", result.stdout
+    assert_equal 'hello', result.stdout
   end
 
   def test_capture_passes_stdin_data
-    spec = KamalBackup::CommandSpec.new(argv: [RbConfig.ruby, "-e", "print $stdin.read.upcase"])
+    spec = KamalBackup::CommandSpec.new(argv: [RbConfig.ruby, '-e', 'print $stdin.read.upcase'])
 
-    result = KamalBackup::Command.capture(spec, input: "hello", redactor: KamalBackup::Redactor.new(env: {}))
+    result = KamalBackup::Command.capture(spec, input: 'hello', redactor: KamalBackup::Redactor.new(env: {}))
 
-    assert_equal "HELLO", result.stdout
+    assert_equal 'HELLO', result.stdout
   end
 
   def test_capture_logs_redacted_command_summary_when_command_output_is_configured
     io = StringIO.new
-    redactor = KamalBackup::Redactor.new(env: { "PGPASSWORD" => "supersecret123" })
-    output = KamalBackup::CommandOutput.new(io: io, env: { "USER" => "tester" })
+    redactor = KamalBackup::Redactor.new(env: { 'PGPASSWORD' => 'supersecret123' })
+    output = KamalBackup::CommandOutput.new(io: io, env: { 'USER' => 'tester' })
     spec = KamalBackup::CommandSpec.new(
-      argv: [RbConfig.ruby, "-e", "puts 'out'; warn ENV.fetch('PGPASSWORD')"],
-      env: { "PGPASSWORD" => "supersecret123" }
+      argv: [RbConfig.ruby, '-e', "puts 'out'; warn ENV.fetch('PGPASSWORD')"],
+      env: { 'PGPASSWORD' => 'supersecret123' }
     )
 
     result = KamalBackup::Command.with_output(output) do
@@ -127,49 +129,51 @@ class CommandTest < Minitest::Test
 
     assert_equal "out\n", result.stdout
     assert_equal "supersecret123\n", result.stderr
-    assert_includes io.string, "INFO ["
-    assert_includes io.string, "Running PGPASSWORD=[REDACTED]"
-    assert_includes io.string, "as tester@localhost"
-    assert_includes io.string, "[REDACTED]"
-    assert_includes io.string, "Finished in"
-    refute_includes io.string, "DEBUG"
-    refute_includes io.string, "Command:"
+    assert_includes io.string, 'INFO ['
+    assert_includes io.string, 'Running PGPASSWORD=[REDACTED]'
+    assert_includes io.string, 'as tester@localhost'
+    assert_includes io.string, '[REDACTED]'
+    assert_includes io.string, 'Finished in'
+    refute_includes io.string, 'DEBUG'
+    refute_includes io.string, 'Command:'
     refute_includes io.string, "\e["
-    refute_includes io.string, "supersecret123"
+    refute_includes io.string, 'supersecret123'
   end
 
   def test_command_output_can_log_remote_host_target
     io = StringIO.new
     redactor = KamalBackup::Redactor.new(env: {})
-    output = KamalBackup::CommandOutput.new(io: io, env: { "USER" => "tester" })
-    spec = KamalBackup::CommandSpec.new(argv: ["docker", "exec", "demo-backup", "kamal-backup", "backup"], host: "example.com")
+    output = KamalBackup::CommandOutput.new(io: io, env: { 'USER' => 'tester' })
+    spec = KamalBackup::CommandSpec.new(argv: %w[docker exec demo-backup kamal-backup backup],
+                                        host: 'example.com')
 
     context = output.command_start(spec, redactor: redactor)
     output.command_exit(context, 0)
 
-    assert_includes io.string, "Running docker exec demo-backup kamal-backup backup on example.com"
-    refute_includes io.string, "localhost"
+    assert_includes io.string, 'Running docker exec demo-backup kamal-backup backup on example.com'
+    refute_includes io.string, 'localhost'
   end
 
   def test_command_output_uses_kamal_host_inside_accessory_container
     io = StringIO.new
     redactor = KamalBackup::Redactor.new(env: {})
-    output = KamalBackup::CommandOutput.new(io: io, env: { "KAMAL_HOST" => "floppydisco.live", "USER" => "root" })
-    spec = KamalBackup::CommandSpec.new(argv: ["restic", "snapshots"])
+    output = KamalBackup::CommandOutput.new(io: io, env: { 'KAMAL_HOST' => 'floppydisco.live', 'USER' => 'root' })
+    spec = KamalBackup::CommandSpec.new(argv: %w[restic snapshots])
 
     context = output.command_start(spec, redactor: redactor)
     output.command_exit(context, 0)
 
-    assert_includes io.string, "Running restic snapshots on floppydisco.live"
-    refute_includes io.string, "localhost"
-    refute_includes io.string, "root@"
+    assert_includes io.string, 'Running restic snapshots on floppydisco.live'
+    refute_includes io.string, 'localhost'
+    refute_includes io.string, 'root@'
   end
 
   def test_command_output_uses_sshkit_colors_when_enabled
     io = StringIO.new
     redactor = KamalBackup::Redactor.new(env: {})
-    output = KamalBackup::CommandOutput.new(io: io, env: { "SSHKIT_COLOR" => "1", "USER" => "tester" }, verbosity: :debug)
-    context = output.command_start(KamalBackup::CommandSpec.new(argv: ["restic", "check"]), redactor: redactor)
+    output = KamalBackup::CommandOutput.new(io: io, env: { 'SSHKIT_COLOR' => '1', 'USER' => 'tester' },
+                                            verbosity: :debug)
+    context = output.command_start(KamalBackup::CommandSpec.new(argv: %w[restic check]), redactor: redactor)
 
     output.command_output(context, :stdout, "out\n", redactor: redactor)
     output.command_output(context, :stderr, "err\n", redactor: redactor)
@@ -190,24 +194,24 @@ class CommandTest < Minitest::Test
     io = StringIO.new
     redactor = KamalBackup::Redactor.new(env: {})
     output = KamalBackup::CommandOutput.new(io: io, verbosity: :debug)
-    spec = KamalBackup::CommandSpec.new(argv: [RbConfig.ruby, "-e", "print $stdin.read"])
+    spec = KamalBackup::CommandSpec.new(argv: [RbConfig.ruby, '-e', 'print $stdin.read'])
 
     result = KamalBackup::Command.with_output(output) do
-      KamalBackup::Command.capture(spec, input: "payload", redactor: redactor, log_output: false)
+      KamalBackup::Command.capture(spec, input: 'payload', redactor: redactor, log_output: false)
     end
 
-    assert_equal "payload", result.stdout
-    assert_includes io.string, "Command:"
-    assert_includes io.string, "Finished in"
-    refute_includes io.string, "payload"
+    assert_equal 'payload', result.stdout
+    assert_includes io.string, 'Command:'
+    assert_includes io.string, 'Finished in'
+    refute_includes io.string, 'payload'
   end
 
   def test_capture_tees_redacted_output_without_prefixing
     out = StringIO.new
     err = StringIO.new
-    redactor = KamalBackup::Redactor.new(env: { "RESTIC_PASSWORD" => "supersecret123" })
+    redactor = KamalBackup::Redactor.new(env: { 'RESTIC_PASSWORD' => 'supersecret123' })
     spec = KamalBackup::CommandSpec.new(
-      argv: [RbConfig.ruby, "-e", "puts 'out'; warn 'err super' + 'secret123'"]
+      argv: [RbConfig.ruby, '-e', "puts 'out'; warn 'err super' + 'secret123'"]
     )
 
     result = KamalBackup::Command.capture(spec, redactor: redactor, tee_stdout: out, tee_stderr: err)
@@ -221,31 +225,31 @@ class CommandTest < Minitest::Test
 
   def test_command_output_redacts_secrets_split_across_chunks
     io = StringIO.new
-    redactor = KamalBackup::Redactor.new(env: { "RESTIC_PASSWORD" => "supersecret123" })
+    redactor = KamalBackup::Redactor.new(env: { 'RESTIC_PASSWORD' => 'supersecret123' })
     output = KamalBackup::CommandOutput.new(io: io, verbosity: :debug)
-    context = output.command_start(KamalBackup::CommandSpec.new(argv: ["restic", "check"]), redactor: redactor)
+    context = output.command_start(KamalBackup::CommandSpec.new(argv: %w[restic check]), redactor: redactor)
 
-    output.command_output(context, :stderr, "prefix super", redactor: redactor)
+    output.command_output(context, :stderr, 'prefix super', redactor: redactor)
     output.command_output(context, :stderr, "secret123 suffix\n", redactor: redactor)
     output.command_exit(context, 0)
 
-    refute_includes io.string, "supersecret123"
-    assert_includes io.string, "prefix [REDACTED] suffix"
+    refute_includes io.string, 'supersecret123'
+    assert_includes io.string, 'prefix [REDACTED] suffix'
   end
 
   def test_capture_redacts_secrets_in_error_message
     spec = KamalBackup::CommandSpec.new(
-      argv: [RbConfig.ruby, "-e", "warn 'password is supersecret123'; exit 1"],
+      argv: [RbConfig.ruby, '-e', "warn 'password is supersecret123'; exit 1"],
       env: {}
     )
-    redactor = KamalBackup::Redactor.new(env: { "RESTIC_PASSWORD" => "supersecret123" })
+    redactor = KamalBackup::Redactor.new(env: { 'RESTIC_PASSWORD' => 'supersecret123' })
 
     error = assert_raises(KamalBackup::CommandError) do
       KamalBackup::Command.capture(spec, redactor: redactor)
     end
 
-    refute_includes error.message, "supersecret123"
-    assert_includes error.message, "[REDACTED]"
+    refute_includes error.message, 'supersecret123'
+    assert_includes error.message, '[REDACTED]'
   end
 
   def test_command_spec_rejects_empty_argv
@@ -256,18 +260,18 @@ class CommandTest < Minitest::Test
 
   def test_command_spec_strips_nil_env_values
     spec = KamalBackup::CommandSpec.new(
-      argv: ["echo"],
-      env: { "KEEP" => "value", "DROP" => nil, "EMPTY" => "" }
+      argv: ['echo'],
+      env: { 'KEEP' => 'value', 'DROP' => nil, 'EMPTY' => '' }
     )
 
-    assert_equal({ "KEEP" => "value" }, spec.env)
+    assert_equal({ 'KEEP' => 'value' }, spec.env)
   end
 
   def test_available_returns_true_for_existing_binary
-    assert KamalBackup::Command.available?(RbConfig.ruby.split("/").last)
+    assert KamalBackup::Command.available?(RbConfig.ruby.split('/').last)
   end
 
   def test_available_returns_false_for_nonexistent_binary
-    refute KamalBackup::Command.available?("nonexistent_binary_xyz_12345")
+    refute KamalBackup::Command.available?('nonexistent_binary_xyz_12345')
   end
 end
