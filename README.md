@@ -8,6 +8,7 @@
 
 [![Gem Version](https://img.shields.io/gem/v/kamal-backup.svg)](https://rubygems.org/gems/kamal-backup)
 [![CI](https://github.com/crmne/kamal-backup/actions/workflows/ci.yml/badge.svg)](https://github.com/crmne/kamal-backup/actions/workflows/ci.yml)
+[![codecov](https://codecov.io/gh/crmne/kamal-backup/branch/master/graph/badge.svg)](https://codecov.io/gh/crmne/kamal-backup)
 [![Docker Image](https://img.shields.io/badge/image-ghcr.io%2Fcrmne%2Fkamal--backup-blue)](https://github.com/crmne/kamal-backup/pkgs/container/kamal-backup)
 [![Docs](https://img.shields.io/badge/docs-kamal--backup.dev-blue)](https://kamal-backup.dev)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)

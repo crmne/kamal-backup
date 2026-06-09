@@ -37,7 +37,10 @@ Gem::Specification.new do |spec|
   spec.require_paths = ['lib']
 
   spec.add_dependency 'thor', '~> 1.5'
-  spec.add_development_dependency 'minitest'
+  spec.add_development_dependency 'minitest', '~> 6.0'
+  spec.add_development_dependency 'minitest-mock'
   spec.add_development_dependency 'overcommit'
   spec.add_development_dependency 'rubocop'
+  spec.add_development_dependency 'simplecov'
+  spec.add_development_dependency 'simplecov-cobertura'
 end

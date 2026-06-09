@@ -1,5 +1,23 @@
 # frozen_string_literal: true
 
+unless ENV['SKIP_COVERAGE']
+  require 'simplecov'
+  require 'simplecov-cobertura'
+
+  SimpleCov.start do
+    add_filter '/test/'
+
+    enable_coverage :branch
+
+    formatter SimpleCov::Formatter::MultiFormatter.new(
+      [
+        SimpleCov::Formatter::SimpleFormatter,
+        SimpleCov::Formatter::CoberturaFormatter
+      ]
+    )
+  end
+end
+
 $LOAD_PATH.unshift(File.expand_path('../lib', __dir__))
 
 require 'fileutils'

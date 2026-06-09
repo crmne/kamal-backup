@@ -21,7 +21,18 @@ jobs:
         with:
           ruby-version: "3.3"
           bundler-cache: true
+      - name: Install restic and sqlite3 for integration tests
+        run: sudo apt-get update && sudo apt-get install -y restic sqlite3
       - run: bin/test
+        env:
+          KAMAL_BACKUP_RUN_INTEGRATION: "1"
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v5
+        env:
+          CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
+        with:
+          files: ./coverage/coverage.xml
+          fail_ci_if_error: false
 
   release_gate:
     runs-on: ubuntu-latest
