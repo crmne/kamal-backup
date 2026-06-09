@@ -3,9 +3,12 @@
 require 'shellwords'
 require 'yaml'
 require_relative 'command'
+require_relative 'yaml_access'
 
 module KamalBackup
   class KamalBridge
+    include YamlAccess
+
     DEFAULT_CONFIG_FILE = 'config/deploy.yml'
     VERSION_LINE_PATTERN = /\A\d+(?:\.\d+)+(?:[-.][A-Za-z0-9]+)*\z/
 
@@ -168,10 +171,6 @@ module KamalBackup
           secrets[key] = value.to_s
         end
       end
-    end
-
-    def fetch(hash, key)
-      hash[key] || hash[key.to_s] || hash[key.to_sym]
     end
 
     def kamal_config_argv

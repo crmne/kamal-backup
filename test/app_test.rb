@@ -5,7 +5,7 @@ require 'json'
 
 class AppTest < Minitest::Test
   class FakeRestic
-    attr_reader :backup_path_calls, :check_calls, :database_file_calls, :ensure_repository_calls, :forget_calls,
+    attr_reader :backup_path_calls, :check_calls, :database_file_calls, :ensure_repository_calls,
                 :latest_snapshot_calls, :prune_calls, :restore_snapshot_calls
 
     def initialize
@@ -13,7 +13,6 @@ class AppTest < Minitest::Test
       @check_calls = 0
       @database_file_calls = []
       @ensure_repository_calls = 0
-      @forget_calls = 0
       @latest_snapshot_calls = []
       @prune_calls = 0
       @restore_snapshot_calls = []
@@ -29,10 +28,6 @@ class AppTest < Minitest::Test
 
     def backup_paths(paths, tags:)
       @backup_path_calls << { paths: paths, tags: tags }
-    end
-
-    def forget_after_success
-      @forget_calls += 1
     end
 
     def prune
@@ -157,7 +152,7 @@ class AppTest < Minitest::Test
       assert_equal 1, restic.backup_path_calls.size
       assert_equal [first_path, second_path], restic.backup_path_calls.first.fetch(:paths)
       assert_equal ['type:files'], restic.backup_path_calls.first.fetch(:tags)
-      assert_equal 1, restic.forget_calls
+      assert_equal 1, restic.prune_calls
       assert_equal 'backup_result', result.fetch(:kind)
       assert_equal 'latest-database-snapshot', result.fetch(:databases).first.fetch(:snapshot)
       assert_equal 'latest-files-snapshot', result.fetch(:files).fetch(:snapshot)
@@ -293,7 +288,7 @@ class AppTest < Minitest::Test
 
       app.backup
 
-      assert_equal 0, restic.forget_calls
+      assert_equal 0, restic.prune_calls
     end
   end
 
@@ -494,8 +489,8 @@ class AppTest < Minitest::Test
       assert_equal 1, result.fetch(:schema_version)
       assert_equal 'drill_result', result.fetch(:kind)
       assert_equal 'production', result.fetch(:scope)
-      assert_equal 'latest-database-snapshot', result.fetch(:database).fetch(:snapshot)
-      assert_equal 'postgres', result.fetch(:database).fetch(:adapter)
+      assert_equal 'latest-database-snapshot', result.fetch(:databases).first.fetch(:snapshot)
+      assert_equal 'postgres', result.fetch(:databases).first.fetch(:adapter)
       assert_equal File.expand_path(target), result.fetch(:files).fetch(:target)
       assert_equal 'ok', result.fetch(:check).fetch(:status)
       assert_equal 'verified', result.fetch(:check).fetch(:output)
@@ -560,13 +555,10 @@ class AppTest < Minitest::Test
         database: FakeDatabase.new(adapter_name: 'sqlite', current_target_identifier: db)
       )
 
-      app.define_singleton_method(:require_restic!) do
-        raise KamalBackup::ConfigurationError,
-              'restic is required on PATH for commands that run on this machine. Install restic locally and try again.'
-      end
-
-      error = assert_raises(KamalBackup::ConfigurationError) do
-        app.restore_to_local_machine('latest')
+      error = KamalBackup::Command.stub(:available?, false) do
+        assert_raises(KamalBackup::ConfigurationError) do
+          app.restore_to_local_machine('latest')
+        end
       end
 
       assert_includes error.message, 'restic is required on PATH'

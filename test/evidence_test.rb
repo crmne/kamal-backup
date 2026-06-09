@@ -6,10 +6,9 @@ require 'json'
 class EvidenceTest < Minitest::Test
   class FakeRestic
     def latest_snapshot(tags:)
-      case tags
-      when ['type:database']
+      if tags.include?('type:database')
         { 'short_id' => 'db123', 'time' => '2026-04-23T11:00:00Z', 'tags' => tags }
-      when ['type:files']
+      elsif tags.include?('type:files')
         { 'short_id' => 'files123', 'time' => '2026-04-23T11:00:00Z', 'tags' => tags }
       end
     end
@@ -151,7 +150,7 @@ class EvidenceTest < Minitest::Test
         redactor: KamalBackup::Redactor.new(env: {})
       ).to_h
 
-      assert evidence.fetch(:latest_database_backup).key?(:error)
+      assert evidence.fetch(:latest_database_backups).fetch('app').key?(:error)
       assert evidence.fetch(:latest_file_backup).key?(:error)
     end
   end
@@ -170,7 +169,7 @@ class EvidenceTest < Minitest::Test
         redactor: KamalBackup::Redactor.new(env: {})
       ).to_h
 
-      db_backup = evidence.fetch(:latest_database_backup)
+      db_backup = evidence.fetch(:latest_database_backups).fetch('app')
       assert_equal 'db123', db_backup.fetch(:id)
       assert_equal '2026-04-23T11:00:00Z', db_backup.fetch(:time)
 

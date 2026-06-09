@@ -160,11 +160,12 @@ class ResticTest < Minitest::Test
     end
   end
 
-  def test_database_file_finds_stable_and_legacy_dump_paths
+  def test_database_file_finds_the_database_dump_path
     config = KamalBackup::Config.new(env: base_env('APP_NAME' => 'demo'))
     json = [
-      { 'type' => 'file', 'path' => '/databases/demo/app/postgres.pgdump' },
-      { 'type' => 'file', 'path' => '/databases-demo-app-postgres-20260422T120000Z.pgdump' }
+      { 'type' => 'dir', 'path' => '/databases/demo/app' },
+      { 'type' => 'file', 'path' => '/databases/demo/queue/postgres.pgdump' },
+      { 'type' => 'file', 'path' => '/databases/demo/app/postgres.pgdump' }
     ].map(&:to_json).join("\n")
     restic = FakeRestic.new(config, json)
 
@@ -172,7 +173,18 @@ class ResticTest < Minitest::Test
                  restic.database_file('snapshot', 'postgres', database_name: 'app')
   end
 
-  def test_forget_after_success_groups_database_snapshots_by_host
+  def test_database_file_falls_back_to_legacy_dump_layouts
+    config = KamalBackup::Config.new(env: base_env('APP_NAME' => 'demo'))
+    json = [
+      { 'type' => 'file', 'path' => '/databases-demo-app-postgres-20260422T120000Z.pgdump' }
+    ].map(&:to_json).join("\n")
+    restic = FakeRestic.new(config, json)
+
+    assert_equal '/databases-demo-app-postgres-20260422T120000Z.pgdump',
+                 restic.database_file('snapshot', 'postgres', database_name: 'app')
+  end
+
+  def test_prune_groups_database_snapshots_by_host
     config = KamalBackup::Config.new(env: base_env(
       'APP_NAME' => 'demo',
       'DATABASE_ADAPTER' => 'sqlite',
@@ -182,7 +194,7 @@ class ResticTest < Minitest::Test
     ))
     restic = FakeRestic.new(config, '[]')
 
-    restic.forget_after_success
+    restic.prune
 
     assert_equal 1, restic.calls.size
     args = restic.last_args
@@ -194,7 +206,7 @@ class ResticTest < Minitest::Test
     refute_includes args, 'host,tags'
   end
 
-  def test_forget_after_success_scopes_database_and_file_retention_separately
+  def test_prune_scopes_database_and_file_retention_separately
     config = KamalBackup::Config.new(env: base_env(
       'APP_NAME' => 'demo',
       'DATABASE_ADAPTER' => 'sqlite',
@@ -203,7 +215,7 @@ class ResticTest < Minitest::Test
     ))
     restic = FakeRestic.new(config, '[]')
 
-    restic.forget_after_success
+    restic.prune
 
     tag_filters = restic.calls.filter_map do |args|
       tag_index = args.index('--tag')
@@ -214,7 +226,7 @@ class ResticTest < Minitest::Test
     assert_includes tag_filters, 'kamal-backup,app:demo,type:files'
   end
 
-  def test_forget_after_success_keeps_same_adapter_databases_in_separate_retention_groups
+  def test_prune_keeps_same_adapter_databases_in_separate_retention_groups
     Dir.mktmpdir do |dir|
       config_dir = File.join(dir, 'config')
       FileUtils.mkdir_p(config_dir)
@@ -237,7 +249,7 @@ class ResticTest < Minitest::Test
       config = KamalBackup::Config.new(env: {}, cwd: dir, load_project_defaults: false)
       restic = FakeRestic.new(config, '[]')
 
-      restic.forget_after_success
+      restic.prune
 
       tag_filters = restic.calls.filter_map do |args|
         tag_index = args.index('--tag')

@@ -69,9 +69,9 @@ module KamalBackup
 
       def current_connection
         if value('DATABASE_URL')
-          connection_from_url(value('DATABASE_URL'), 'DATABASE_URL').tap do |connection|
-            connection['PGPASSWORD'] ||= value('PGPASSWORD') if value('PGPASSWORD')
-          end
+          connection = connection_from_url(value('DATABASE_URL'), 'DATABASE_URL')
+          connection['PGPASSWORD'] ||= value('PGPASSWORD')
+          connection.compact
         else
           connection = prefixed_env('', SOURCE_ENV_KEYS)
           unless connection['PGDATABASE']

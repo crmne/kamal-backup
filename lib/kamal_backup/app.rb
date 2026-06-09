@@ -22,14 +22,11 @@ module KamalBackup
 
     attr_reader :config, :redactor
 
-    def initialize(env: ENV, config: nil, redactor: nil, restic: nil, database: nil, evidence_class: Evidence,
-                   scheduler_class: Scheduler)
+    def initialize(env: ENV, config: nil, redactor: nil, restic: nil, database: nil)
       @config = config || Config.new(env: env)
       @redactor = redactor || Redactor.new(env: @config.env)
       @restic = restic
       @database = database
-      @evidence_class = evidence_class
-      @scheduler_class = scheduler_class
     end
 
     def backup(force: false)
@@ -37,13 +34,11 @@ module KamalBackup
       config.validate_backup
       return skipped_backup_result(started_at) unless force || backup_due?(started_at)
 
-      require_restic!
-
       restic.ensure_repository
       databases.each { |database| database.backup(restic) }
       restic.backup_paths(config.backup_paths, tags: ['type:files'])
 
-      restic.forget_after_success if config.forget_after_backup?
+      restic.prune if config.forget_after_backup?
 
       restic.check if config.check_after_backup?
 
@@ -60,46 +55,39 @@ module KamalBackup
 
     def restore_to_local_machine(snapshot = 'latest')
       validate_local_machine_restore
-      require_restic!
 
       build_restore_result('local', snapshot) do |result|
         databases.each { |adapter| validate_local_machine_database_target(adapter) }
-        database_results = perform_database_restores_to_current(snapshot)
-        file_results = perform_replacement_file_restores(snapshot, production_source: false)
-        assign_restore_results(result, database_results, file_results)
+        result[:databases] = perform_database_restores_to_current(snapshot)
+        result[:files] = perform_replacement_file_restore(snapshot, production_source: false)
       end
     end
 
     def restore_to_production(snapshot = 'latest')
       validate_production_restore
-      require_restic!
 
       build_restore_result('production', snapshot) do |result|
-        database_results = perform_database_restores_to_current(snapshot)
-        file_results = perform_replacement_file_restores(snapshot, production_source: true)
-        assign_restore_results(result, database_results, file_results)
+        result[:databases] = perform_database_restores_to_current(snapshot)
+        result[:files] = perform_replacement_file_restore(snapshot, production_source: true)
       end
     end
 
     def drill_on_local_machine(snapshot = 'latest', check_command: nil)
       validate_local_machine_restore
-      require_restic!
 
       run_drill('local', snapshot, check_command: check_command) do |result|
         databases.each { |adapter| validate_local_machine_database_target(adapter) }
-        database_results = perform_database_restores_to_current(snapshot)
-        file_results = perform_replacement_file_restores(snapshot, production_source: false)
-        assign_restore_results(result, database_results, file_results)
+        result[:databases] = perform_database_restores_to_current(snapshot)
+        result[:files] = perform_replacement_file_restore(snapshot, production_source: false)
       end
     end
 
     def drill_on_production(snapshot = 'latest', database_name: nil, sqlite_path: nil, file_target: '/restore/files',
                             check_command: nil)
       validate_production_drill(file_target, database_name, sqlite_path)
-      require_restic!
 
       run_drill('production', snapshot, check_command: check_command) do |result|
-        database_results = databases.map do |adapter|
+        result[:databases] = databases.map do |adapter|
           perform_database_restore_to_scratch(
             snapshot,
             adapter: adapter,
@@ -107,44 +95,33 @@ module KamalBackup
             sqlite_path: sqlite_path
           )
         end
-        file_results = [perform_file_restore(snapshot, target: file_target)]
-        assign_restore_results(result, database_results, file_results)
+        result[:files] = perform_file_restore(snapshot, target: file_target)
       end
-    end
-
-    def drill_failed?(result)
-      result.fetch(:status) != 'ok'
-    rescue KeyError
-      true
     end
 
     def snapshots
       config.validate_restic
-      require_restic!
       restic.snapshots.stdout
     end
 
     def check
       config.validate_restic
-      require_restic!
       restic.check.stdout
     end
 
     def prune
       config.validate_backup(check_files: false)
-      require_restic!
       restic.prune
     end
 
     def evidence
       config.validate_restic
-      require_restic!
-      @evidence_class.new(config, restic: restic, redactor: redactor).to_json
+      Evidence.new(config, restic: restic, redactor: redactor).to_json
     end
 
     def schedule
       config.validate_backup
-      @scheduler_class.new(config) { backup(force: true) }.run
+      Scheduler.new(config) { backup(force: true) }.run
     end
 
     private
@@ -155,7 +132,7 @@ module KamalBackup
     end
 
     def skipped_backup_result(now)
-      {
+      Schema.record(
         kind: 'backup_result',
         status: 'skipped',
         reason: 'not_due',
@@ -163,7 +140,7 @@ module KamalBackup
         next_backup_at: next_backup_at&.iso8601,
         force_command: 'kamal-backup backup --force',
         finished_at: now.iso8601
-      }
+      )
     end
 
     def next_backup_at
@@ -172,7 +149,7 @@ module KamalBackup
 
     def last_backup_finished_at
       @last_backup_finished_at ||= begin
-        value = last_backup_record['finished_at'] || last_backup_record['last_backup_at']
+        value = last_backup_record['finished_at']
         value ? Time.parse(value.to_s).utc : nil
       rescue ArgumentError
         nil
@@ -197,10 +174,8 @@ module KamalBackup
         started_at: started_at.iso8601,
         finished_at: nil,
         error: nil,
-        database: nil,
         databases: [],
-        files: nil,
-        paths: nil
+        files: nil
       )
       yield(result)
       result[:finished_at] = Time.now.utc.iso8601
@@ -218,10 +193,8 @@ module KamalBackup
         started_at: started_at.iso8601,
         finished_at: nil,
         error: nil,
-        database: nil,
         databases: [],
         files: nil,
-        paths: nil,
         check: nil
       )
 
@@ -274,33 +247,15 @@ module KamalBackup
       databases.map { |adapter| perform_database_restore_to_current(snapshot, adapter: adapter) }
     end
 
-    def perform_replacement_file_restores(snapshot, production_source:)
-      source_paths = production_source ? config.backup_paths : config.local_restore_source_paths
-      [
-        perform_replacement_file_restore(
-          snapshot,
-          source_paths: source_paths,
-          target_paths: config.backup_paths
-        )
-      ]
-    end
-
-    def assign_restore_results(result, database_results, file_results)
-      result[:databases] = database_results
-      result[:database] = database_results.first
-      result[:paths] = file_results.first
-      result[:files] = file_results.size == 1 ? file_results.first : file_results
-    end
-
     def backup_summary(started_at:, finished_at:)
-      {
+      Schema.record(
         kind: 'backup_result',
         status: 'ok',
         started_at: started_at.iso8601,
         finished_at: finished_at.iso8601,
         databases: databases.map { |adapter| backup_snapshot_summary(adapter) },
         files: backup_file_snapshot_summary
-      }
+      )
     end
 
     def backup_snapshot_summary(adapter)
@@ -359,11 +314,7 @@ module KamalBackup
     end
 
     def database_config_name(adapter)
-      if adapter.respond_to?(:config) && adapter.config.respond_to?(:database_name)
-        adapter.config.database_name
-      else
-        config.database_name
-      end
+      adapter.config.database_name
     end
 
     def perform_file_restore(snapshot, target:)
@@ -377,7 +328,9 @@ module KamalBackup
       }
     end
 
-    def perform_replacement_file_restore(snapshot, source_paths:, target_paths:)
+    def perform_replacement_file_restore(snapshot, production_source:)
+      source_paths = production_source ? config.backup_paths : config.local_restore_source_paths
+      target_paths = config.backup_paths
       resolved_snapshot = resolve_snapshot(snapshot, tags: ['type:files'])
       Dir.mktmpdir('kamal-backup-restore-') do |stage_dir|
         restic.restore_snapshot(resolved_snapshot, stage_dir)
@@ -463,14 +416,6 @@ module KamalBackup
       config.validate_local_database_restore_target(adapter.current_target_identifier)
     end
 
-    def require_restic!
-      return unless using_builtin_restic?
-      return if Command.available?('restic')
-
-      raise ConfigurationError,
-            'restic is required on PATH for commands that run on this machine. Install restic locally and try again.'
-    end
-
     def run_drill_check(command)
       result = Command.capture(
         CommandSpec.new(argv: ['sh', '-lc', command]),
@@ -503,15 +448,14 @@ module KamalBackup
     end
 
     def restic
-      @restic ||= Restic.new(config, redactor: redactor)
-    end
+      @restic ||= begin
+        unless Command.available?('restic')
+          raise ConfigurationError,
+                'restic is required on PATH for commands that run on this machine. Install restic locally and try again.'
+        end
 
-    def using_builtin_restic?
-      @restic.nil? || @restic.is_a?(Restic)
-    end
-
-    def database
-      databases.first
+        Restic.new(config, redactor: redactor)
+      end
     end
 
     def databases
@@ -529,7 +473,6 @@ module KamalBackup
         raise ConfigurationError, "no restic snapshot found for #{tags.join(', ')}" unless snapshot
 
         snapshot['short_id'] || snapshot['id']
-
       else
         argument
       end

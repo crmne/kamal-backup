@@ -222,10 +222,6 @@ class CLITest < Minitest::Test
       { status: 'ok', mode: 'local' }
     end
 
-    def fake.drill_failed?(result)
-      result.fetch(:status) != 'ok'
-    end
-
     out, = capture_io do
       with_fake_app(fake) do
         KamalBackup::CLI.start(['drill', 'local', '--yes'], env: base_env)
@@ -240,10 +236,6 @@ class CLITest < Minitest::Test
     fake = Object.new
     def fake.drill_on_local_machine(*, **)
       { status: 'failed', error: 'restore failed' }
-    end
-
-    def fake.drill_failed?(result)
-      result.fetch(:status) != 'ok'
     end
 
     out, = capture_io do
@@ -264,6 +256,7 @@ class CLITest < Minitest::Test
     fake.define_singleton_method(:config) { Struct.new(:database_adapter).new('postgres') }
     fake.define_singleton_method(:drill_on_production) do |snapshot, database_name:, sqlite_path:, file_target:, check_command:|
       {
+        status: 'ok',
         snapshot: snapshot,
         database_name: database_name,
         sqlite_path: sqlite_path,
@@ -271,7 +264,6 @@ class CLITest < Minitest::Test
         check_command: check_command
       }
     end
-    fake.define_singleton_method(:drill_failed?) { |_| false }
 
     out, = capture_io do
       with_fake_app(fake) do
@@ -518,7 +510,7 @@ class CLITest < Minitest::Test
     received = {}
     fake.define_singleton_method(:backup) do |**|
       received[:output] = KamalBackup::Command.output
-      true
+      { status: 'ok', finished_at: Time.now.utc.iso8601, databases: [], files: nil }
     end
 
     Dir.mktmpdir do |dir|

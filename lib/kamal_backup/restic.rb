@@ -91,14 +91,6 @@ module KamalBackup
       run(['backup'] + host_args + exclude_args(excludes) + paths + tag_args(common_tags + tags + path_tags))
     end
 
-    def backup_path(path, tags:)
-      backup_paths([path], tags: tags)
-    end
-
-    def forget_after_success
-      prune
-    end
-
     def prune
       retention_tag_sets.map do |tags|
         args = ['forget', '--prune', '--group-by', 'host'] + config.retention_args + filter_tag_args(tags)
@@ -150,21 +142,25 @@ module KamalBackup
       end
     end
 
-    def database_file(snapshot, adapter, database_name: nil)
+    # Database dumps from 0.2 and earlier used different layouts. Keep matching
+    # them so snapshots taken before 0.3 stay restorable:
+    # databases/<app>/<database>/<adapter>.<ext> is current,
+    # databases/<app>/<adapter>/... is 0.2 (no database name), and the
+    # databases-<app>-... basenames are the earliest flat filenames.
+    def database_file(snapshot, adapter, database_name:)
       legacy_prefix = "databases/#{config.app_name}/#{adapter}/"
       app = config.app_name.gsub(/[^A-Za-z0-9_.-]+/, '-')
       database = database_name.to_s.gsub(/[^A-Za-z0-9_.-]+/, '-')
-      stable_prefix = database.empty? ? nil : "databases/#{app}/#{database}/#{adapter}."
+      prefix = "databases/#{app}/#{database}/#{adapter}."
       flat_prefix = "databases-#{app}-#{adapter}-"
-      named_flat_prefix = database.empty? ? nil : "databases-#{app}-#{database}-#{adapter}-"
+      named_flat_prefix = "databases-#{app}-#{database}-#{adapter}-"
       ls_json(snapshot).find do |entry|
         next false unless entry['type'] == 'file'
 
         normalized = entry['path'].to_s.sub(%r{\A/+}, '')
-        (stable_prefix && normalized.start_with?(stable_prefix)) ||
+        normalized.start_with?(prefix) ||
           normalized.start_with?(legacy_prefix) ||
-          File.basename(normalized).start_with?(flat_prefix) ||
-          (named_flat_prefix && File.basename(normalized).start_with?(named_flat_prefix))
+          File.basename(normalized).start_with?(flat_prefix, named_flat_prefix)
       end&.fetch('path')
     end
 
@@ -229,8 +225,8 @@ module KamalBackup
     def database_retention_tag_sets
       config.databases.group_by(&:database_adapter).flat_map do |adapter, databases|
         if databases.one?
-          # Pre-0.3 database snapshots did not include database:<name>, so keep
-          # the single-database filter broad enough for retention to prune them.
+          # Snapshots from 0.2 carry no database:<name> tag, so keep the
+          # single-database filter broad enough for retention to prune them too.
           [common_tags + ['type:database', "adapter:#{adapter}"]]
         else
           databases.map do |database|

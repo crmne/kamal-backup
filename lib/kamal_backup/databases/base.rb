@@ -5,6 +5,17 @@ require_relative '../errors'
 
 module KamalBackup
   module Databases
+    def self.normalize_adapter(value)
+      case value.to_s.downcase
+      when 'postgres', 'postgresql'
+        'postgres'
+      when 'mysql', 'mysql2', 'mariadb'
+        'mysql'
+      when 'sqlite', 'sqlite3'
+        'sqlite'
+      end
+    end
+
     class Base
       def self.build(config, redactor:)
         case config.database_adapter

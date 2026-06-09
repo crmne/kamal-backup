@@ -19,16 +19,13 @@ module KamalBackup
         kind: 'evidence',
         app_name: @config.app_name,
         generated_at: Time.now.utc.iso8601,
-        database_adapter: @config.database_adapter,
         databases: @config.databases.map do |database|
           { name: database.database_name, adapter: database.database_adapter }
         end,
         restic_repository: @redactor.redact_string(@config.restic_repository.to_s),
-        backup_paths: @config.backup_paths,
         paths: @config.backup_paths,
         forget_after_backup: @config.forget_after_backup?,
         retention: @config.retention,
-        latest_database_backup: latest_snapshot_summary(['type:database']),
         latest_database_backups: latest_database_backups,
         latest_file_backup: latest_snapshot_summary(['type:files']),
         last_restic_check: last_check,

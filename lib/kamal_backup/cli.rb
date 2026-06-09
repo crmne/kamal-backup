@@ -139,8 +139,6 @@ module KamalBackup
       end
 
       def print_backup_result(result)
-        return unless result.is_a?(Hash)
-
         if result[:status] == 'skipped'
           puts("No backup due. Last backup finished at #{result.fetch(:last_backup_at)}.")
           puts("Next backup is due at #{result.fetch(:next_backup_at)}.")
@@ -341,7 +339,7 @@ module KamalBackup
         confirm!("Run a local restore drill for #{snapshot}? This will overwrite local data.")
         result = local_restore_app.drill_on_local_machine(snapshot, check_command: options[:check])
         puts(JSON.pretty_generate(result))
-        exit(1) if local_restore_app.drill_failed?(result)
+        exit(1) unless result[:status] == 'ok'
       end
 
       method_option :database, type: :string, desc: 'Scratch database name for PostgreSQL or MySQL'
@@ -368,7 +366,7 @@ module KamalBackup
             check_command: options[:check]
           )
           puts(JSON.pretty_generate(result))
-          exit(1) if direct_app.drill_failed?(result)
+          exit(1) unless result[:status] == 'ok'
         end
       end
 
@@ -432,16 +430,10 @@ module KamalBackup
       Command.with_output(output) do
         super(normalize_global_options(argv))
       end
-    rescue Error => e
-      output ||= CommandOutput.new(io: $stderr, env: env)
-      output.error("(#{e.class}): #{e.message}", redactor: Redactor.new(env: env))
-      exit(1)
     rescue StandardError => e
-      output ||= CommandOutput.new(io: $stderr, env: env)
       output.error("(#{e.class}): #{e.message}", redactor: Redactor.new(env: env))
       exit(1)
     rescue Interrupt
-      output ||= CommandOutput.new(io: $stderr, env: env)
       output.error('(Interrupt): interrupted', redactor: Redactor.new(env: env))
       exit(130)
     ensure

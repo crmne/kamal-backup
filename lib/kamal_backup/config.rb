@@ -1,8 +1,9 @@
 # frozen_string_literal: true
 
 require 'uri'
-require 'yaml'
 require_relative 'errors'
+require_relative 'config_file'
+require_relative 'databases/base'
 require_relative 'rails_app'
 
 module KamalBackup
@@ -19,42 +20,6 @@ module KamalBackup
     SHARED_CONFIG_PATH = 'config/kamal-backup.yml'
     LOCAL_CONFIG_PATH = 'config/kamal-backup.local.yml'
     DEFAULT_CONFIG_PATHS = [SHARED_CONFIG_PATH, LOCAL_CONFIG_PATH].freeze
-    TOP_LEVEL_YAML_KEYS = %w[app accessory databases paths restore_from restic backup state].freeze
-    LEGACY_YAML_KEYS = %w[
-      app_name
-      database_adapter
-      database_url
-      sqlite_database_path
-      backup_paths
-      local_restore_source_paths
-      restic_repository
-      restic_repository_file
-      restic_password
-      restic_password_file
-      restic_password_command
-      restic_init_if_missing
-      restic_check_after_backup
-      restic_check_read_data_subset
-      restic_forget_after_backup
-      restic_keep_last
-      restic_keep_daily
-      restic_keep_weekly
-      restic_keep_monthly
-      restic_keep_yearly
-      backup_schedule_seconds
-      backup_start_delay_seconds
-      state_dir
-      allow_suspicious_paths
-      pgpassword
-      mysql_pwd
-    ].freeze
-    ConfigData = Struct.new(:env, :database_definitions, :path_definitions, :restore_from_definitions,
-                            keyword_init: true) do
-      def self.empty
-        new(env: {}, database_definitions: nil, path_definitions: nil, restore_from_definitions: nil)
-      end
-    end
-    PathDefinition = Struct.new(:path, :exclude, keyword_init: true)
 
     class DatabaseSource
       CONNECTION_KEYS = %w[
@@ -105,7 +70,7 @@ module KamalBackup
       end
 
       def database_adapter
-        @adapter || parent.send(:legacy_database_adapter)
+        @adapter
       end
 
       def value(key)
@@ -242,11 +207,7 @@ module KamalBackup
     end
 
     def local_restore_source_paths
-      if path_definitions?
-        @restore_from_definitions || legacy_local_restore_source_paths || backup_paths
-      else
-        legacy_local_restore_source_paths || backup_paths
-      end
+      @restore_from_definitions || legacy_local_restore_source_paths || backup_paths
     end
 
     def local_restore_path_pairs
@@ -271,10 +232,6 @@ module KamalBackup
       end
     end
 
-    def database_name
-      'app'
-    end
-
     def databases
       @databases ||= if database_definitions?
                        @database_definitions.map do |definition|
@@ -291,7 +248,7 @@ module KamalBackup
                        [
                          DatabaseSource.new(
                            parent: self,
-                           name: database_name,
+                           name: 'app',
                            adapter: legacy_database_adapter,
                            env: {},
                            structured: false
@@ -451,7 +408,7 @@ module KamalBackup
       config_paths(raw_env, cwd: cwd, paths: paths).each_with_object(ConfigData.empty) do |path, merged|
         next unless File.file?(path)
 
-        data = normalize_config_file(path, raw_env: raw_env)
+        data = ConfigFile.new(path, env: raw_env).data
         merged.env.merge!(data.env)
         merged.database_definitions = data.database_definitions if data.database_definitions
         merged.path_definitions = data.path_definitions if data.path_definitions
@@ -493,356 +450,6 @@ module KamalBackup
       raise ConfigurationError, 'RESTIC_PASSWORD, RESTIC_PASSWORD_FILE, or RESTIC_PASSWORD_COMMAND is required'
     end
 
-    def normalize_config_file(path, raw_env:)
-      data = YAML.safe_load(File.read(path), permitted_classes: [], aliases: false)
-      return ConfigData.empty if data.nil?
-
-      raise ConfigurationError, "#{path} must contain a YAML mapping" unless data.is_a?(Hash)
-
-      result = ConfigData.empty
-      data.each do |raw_key, raw_value|
-        key = raw_key.to_s
-        validate_top_level_yaml_key!(path, key)
-
-        case key
-        when 'app'
-          result.env['APP_NAME'] = normalize_yaml_value(raw_value)
-        when 'accessory'
-          result.env['KAMAL_BACKUP_ACCESSORY'] = normalize_yaml_value(raw_value)
-        when 'databases'
-          result.database_definitions = normalize_yaml_databases(raw_value, raw_env: raw_env, path: path)
-        when 'paths'
-          result.path_definitions = normalize_yaml_backup_paths(raw_value, "#{path} paths")
-        when 'restore_from'
-          result.restore_from_definitions = normalize_yaml_paths(raw_value, "#{path} restore_from")
-        when 'restic'
-          result.env.merge!(normalize_yaml_restic(raw_value, raw_env: raw_env, path: path))
-        when 'backup'
-          result.env.merge!(normalize_yaml_backup(raw_value, path: path))
-        when 'state'
-          result.env.merge!(normalize_yaml_state(raw_value, path: path))
-        end
-      end
-      result
-    rescue Psych::SyntaxError => e
-      raise ConfigurationError, "invalid YAML in #{path}: #{e.message}"
-    end
-
-    def validate_top_level_yaml_key!(path, key)
-      if LEGACY_YAML_KEYS.include?(key)
-        raise ConfigurationError,
-              "#{path} uses legacy key #{key}; use databases, paths, restic, and backup instead. See the upgrading guide for the 0.3 config migration."
-      end
-
-      return if TOP_LEVEL_YAML_KEYS.include?(key)
-
-      raise ConfigurationError,
-            "#{path} contains unknown key #{key.inspect}; expected #{TOP_LEVEL_YAML_KEYS.join(', ')}"
-    end
-
-    def normalize_yaml_value(raw_value)
-      case raw_value
-      when Array
-        raw_value.map(&:to_s).join("\n")
-      when NilClass
-        nil
-      else
-        raw_value.to_s
-      end
-    end
-
-    def normalize_yaml_databases(raw_value, raw_env:, path:)
-      entries = require_array(raw_value, "#{path} databases")
-      entries.map.with_index(1) do |entry, index|
-        hash = require_mapping(entry, "#{path} databases[#{index}]")
-        name = required_yaml_scalar(hash, 'name', "#{path} databases[#{index}]")
-        adapter = normalize_adapter(required_yaml_scalar(hash, 'adapter', "#{path} databases[#{index}]"))
-        unless adapter
-          raise ConfigurationError,
-                "#{path} databases[#{index}] adapter must be postgres, mysql, or sqlite"
-        end
-
-        env = {}
-        missing_secrets = []
-        case adapter
-        when 'postgres'
-          if hash.key?('url')
-            env['DATABASE_URL'] =
-              resolve_yaml_value(hash['url'], raw_env: raw_env, context: "#{path} databases[#{index}].url")
-            missing_secrets.concat(missing_yaml_secrets(hash['url'], raw_env: raw_env))
-          end
-          if hash.key?('password')
-            env['PGPASSWORD'] =
-              resolve_yaml_value(hash['password'], raw_env: raw_env, context: "#{path} databases[#{index}].password")
-            missing_secrets.concat(missing_yaml_secrets(hash['password'], raw_env: raw_env))
-          end
-        when 'mysql'
-          if hash.key?('url')
-            env['DATABASE_URL'] =
-              resolve_yaml_value(hash['url'], raw_env: raw_env, context: "#{path} databases[#{index}].url")
-            missing_secrets.concat(missing_yaml_secrets(hash['url'], raw_env: raw_env))
-          end
-          if hash.key?('password')
-            env['MYSQL_PWD'] =
-              resolve_yaml_value(hash['password'], raw_env: raw_env, context: "#{path} databases[#{index}].password")
-            missing_secrets.concat(missing_yaml_secrets(hash['password'], raw_env: raw_env))
-          end
-        when 'sqlite'
-          sqlite_path = hash.key?('path') ? hash['path'] : hash['database']
-          if sqlite_path
-            env['SQLITE_DATABASE_PATH'] =
-              resolve_yaml_value(sqlite_path, raw_env: raw_env, context: "#{path} databases[#{index}].path")
-            missing_secrets.concat(missing_yaml_secrets(sqlite_path, raw_env: raw_env))
-          end
-        end
-
-        {
-          name: name,
-          adapter: adapter,
-          env: env.compact,
-          missing_secrets: missing_secrets
-        }
-      end
-    end
-
-    def normalize_yaml_restic(raw_value, raw_env:, path:)
-      hash = require_mapping(raw_value, "#{path} restic")
-      env = {}
-
-      if hash.key?('repository')
-        env['RESTIC_REPOSITORY'] =
-          resolve_yaml_value(hash['repository'], raw_env: raw_env,
-                                                 context: "#{path} restic.repository")
-      end
-      env['RESTIC_REPOSITORY_FILE'] = normalize_yaml_value(hash['repository_file']) if hash.key?('repository_file')
-
-      if hash.key?('password')
-        normalize_yaml_restic_password(hash['password'], raw_env: raw_env, path: path).each do |key, value|
-          env[key] = value
-        end
-      end
-
-      env.merge!(normalize_yaml_restic_rest(hash['rest'], raw_env: raw_env, path: path)) if hash.key?('rest')
-
-      {
-        'init_if_missing' => 'RESTIC_INIT_IF_MISSING',
-        'check_after_backup' => 'RESTIC_CHECK_AFTER_BACKUP',
-        'check_read_data_subset' => 'RESTIC_CHECK_READ_DATA_SUBSET',
-        'forget_after_backup' => 'RESTIC_FORGET_AFTER_BACKUP'
-      }.each do |source, target|
-        env[target] = normalize_yaml_value(hash[source]) if hash.key?(source)
-      end
-
-      if hash.key?('retention')
-        retention = require_mapping(hash['retention'], "#{path} restic.retention")
-        {
-          'keep_last' => 'RESTIC_KEEP_LAST',
-          'keep_daily' => 'RESTIC_KEEP_DAILY',
-          'keep_weekly' => 'RESTIC_KEEP_WEEKLY',
-          'keep_monthly' => 'RESTIC_KEEP_MONTHLY',
-          'keep_yearly' => 'RESTIC_KEEP_YEARLY'
-        }.each do |source, target|
-          env[target] = normalize_yaml_value(retention[source]) if retention.key?(source)
-        end
-      end
-
-      env.compact
-    end
-
-    def normalize_yaml_restic_password(raw_value, raw_env:, path:)
-      case raw_value
-      when Hash
-        hash = stringify_keys(raw_value)
-        if hash.key?('secret')
-          { 'RESTIC_PASSWORD' => resolve_yaml_value(hash, raw_env: raw_env, context: "#{path} restic.password") }
-        elsif hash.key?('file')
-          { 'RESTIC_PASSWORD_FILE' => normalize_yaml_value(hash['file']) }
-        elsif hash.key?('command')
-          { 'RESTIC_PASSWORD_COMMAND' => normalize_yaml_value(hash['command']) }
-        else
-          raise ConfigurationError, "#{path} restic.password must use secret, file, or command"
-        end
-      else
-        { 'RESTIC_PASSWORD' => normalize_yaml_value(raw_value) }
-      end
-    end
-
-    def normalize_yaml_restic_rest(raw_value, raw_env:, path:)
-      hash = require_mapping(raw_value, "#{path} restic.rest")
-      env = {}
-      username = hash.key?('username') ? hash['username'] : hash['user']
-
-      if username
-        env['RESTIC_REST_USERNAME'] =
-          resolve_yaml_value(username, raw_env: raw_env, context: "#{path} restic.rest.username")
-      end
-      if hash.key?('password')
-        env['RESTIC_REST_PASSWORD'] =
-          resolve_yaml_value(hash['password'], raw_env: raw_env,
-                                               context: "#{path} restic.rest.password")
-      end
-      env.compact
-    end
-
-    def normalize_yaml_backup(raw_value, path:)
-      hash = require_mapping(raw_value, "#{path} backup")
-      env = {}
-      if hash.key?('schedule')
-        env['BACKUP_SCHEDULE_SECONDS'] =
-          normalize_duration(hash['schedule'], "#{path} backup.schedule")
-      end
-      env.compact
-    end
-
-    def normalize_yaml_state(raw_value, path:)
-      hash = require_mapping(raw_value, "#{path} state")
-      env = {}
-      env['KAMAL_BACKUP_STATE_DIR'] = normalize_yaml_value(hash['path']) if hash.key?('path')
-      env.compact
-    end
-
-    def normalize_yaml_paths(raw_value, context)
-      case raw_value
-      when Array
-        raw_value.map { |path| normalize_yaml_path(path, context) }.reject(&:empty?)
-      when NilClass
-        []
-      else
-        [normalize_yaml_path(raw_value, context)].reject(&:empty?)
-      end
-    end
-
-    def normalize_yaml_path(raw_value, context)
-      raise ConfigurationError, "#{context} entries must be path strings" if raw_value.is_a?(Hash) || raw_value.is_a?(Array)
-
-      normalize_yaml_value(raw_value)
-    end
-
-    def normalize_yaml_backup_paths(raw_value, context)
-      case raw_value
-      when Array
-        definitions = raw_value.map.with_index(1) do |entry, index|
-          normalize_yaml_backup_path(entry, "#{context}[#{index}]")
-        end
-        definitions.reject { |definition| definition.path.to_s.empty? }
-      when NilClass
-        []
-      else
-        [normalize_yaml_backup_path(raw_value, "#{context}[1]")].reject { |definition| definition.path.to_s.empty? }
-      end
-    end
-
-    def normalize_yaml_backup_path(raw_value, context)
-      case raw_value
-      when Hash
-        hash = require_mapping(raw_value, context)
-        unknown_keys = hash.keys - %w[path exclude]
-        unless unknown_keys.empty?
-          raise ConfigurationError,
-                "#{context} contains unknown key #{unknown_keys.first.inspect}; expected path and exclude"
-        end
-
-        path = required_yaml_string(hash, 'path', context)
-        exclude = hash.key?('exclude') ? normalize_yaml_excludes(hash['exclude'], "#{context}.exclude") : []
-        PathDefinition.new(path: path, exclude: exclude)
-      when Array
-        raise ConfigurationError, "#{context} must be a path string or a mapping with path and optional exclude"
-      else
-        PathDefinition.new(path: normalize_yaml_value(raw_value), exclude: [])
-      end
-    end
-
-    def normalize_yaml_excludes(raw_value, context)
-      entries = require_array(raw_value, context)
-      entries.map.with_index(1) do |entry, index|
-        pattern = optional_yaml_string(entry, "#{context}[#{index}]")
-        raise ConfigurationError, "#{context}[#{index}] must not be empty" if pattern.to_s.strip.empty?
-
-        pattern
-      end
-    end
-
-    def resolve_yaml_value(raw_value, raw_env:, context:)
-      case raw_value
-      when Hash
-        hash = stringify_keys(raw_value)
-        raise ConfigurationError, "#{context} must be a scalar value or { secret: NAME }" unless hash.keys == ['secret']
-
-        secret_name = normalize_yaml_value(hash.fetch('secret'))
-        raw_env[secret_name]
-      else
-        normalize_yaml_value(raw_value)
-      end
-    end
-
-    def missing_yaml_secrets(raw_value, raw_env:)
-      return [] unless raw_value.is_a?(Hash)
-
-      hash = stringify_keys(raw_value)
-      return [] unless hash.key?('secret')
-
-      secret_name = normalize_yaml_value(hash.fetch('secret'))
-      raw_env[secret_name].to_s.strip.empty? ? [secret_name] : []
-    end
-
-    def normalize_duration(raw_value, context)
-      value = normalize_yaml_value(raw_value)
-      raise ConfigurationError, "#{context} is required" if value.to_s.empty?
-
-      return value if value.match?(/\A\d+\z/)
-
-      match = value.match(/\A(\d+)\s*([smhdw])\z/i)
-      raise ConfigurationError, "#{context} must be seconds or a duration like 30m, 6h, or 1d" unless match
-
-      amount = match[1].to_i
-      multiplier = {
-        's' => 1,
-        'm' => 60,
-        'h' => 3600,
-        'd' => 86_400,
-        'w' => 604_800
-      }.fetch(match[2].downcase)
-      (amount * multiplier).to_s
-    end
-
-    def require_array(value, context)
-      return value if value.is_a?(Array)
-
-      raise ConfigurationError, "#{context} must be a YAML sequence"
-    end
-
-    def require_mapping(value, context)
-      raise ConfigurationError, "#{context} must be a YAML mapping" unless value.is_a?(Hash)
-
-      stringify_keys(value)
-    end
-
-    def optional_yaml_string(value, context)
-      raise ConfigurationError, "#{context} must be a string" if value.is_a?(Hash) || value.is_a?(Array)
-
-      normalize_yaml_value(value)
-    end
-
-    def required_yaml_string(hash, key, context)
-      raise ConfigurationError, "#{context} #{key} is required" unless hash.key?(key)
-
-      value = optional_yaml_string(hash[key], "#{context}.#{key}")
-      raise ConfigurationError, "#{context} #{key} is required" if value.to_s.strip.empty?
-
-      value
-    end
-
-    def required_yaml_scalar(hash, key, context)
-      value = normalize_yaml_value(hash[key])
-      raise ConfigurationError, "#{context} #{key} is required" if value.to_s.empty?
-
-      value
-    end
-
-    def stringify_keys(hash)
-      hash.each_with_object({}) { |(key, value), result| result[key.to_s] = value }
-    end
-
     def validate_local_machine_environment
       if (environment = local_restore_environment)
         key, value = environment
@@ -875,17 +482,6 @@ module KamalBackup
       number
     rescue ArgumentError
       raise ConfigurationError, "#{key} must be an integer"
-    end
-
-    def normalize_adapter(value)
-      case value.to_s.downcase
-      when 'postgres', 'postgresql'
-        'postgres'
-      when 'mysql', 'mysql2', 'mariadb'
-        'mysql'
-      when 'sqlite', 'sqlite3'
-        'sqlite'
-      end
     end
 
     def database_definitions?
@@ -928,7 +524,7 @@ module KamalBackup
 
     def legacy_database_adapter
       if (explicit = value('DATABASE_ADAPTER'))
-        normalize_adapter(explicit)
+        Databases.normalize_adapter(explicit)
       elsif (adapter = adapter_from_database_url)
         adapter
       elsif value('SQLITE_DATABASE_PATH')
@@ -938,7 +534,7 @@ module KamalBackup
 
     def adapter_from_database_url
       if (url = value('DATABASE_URL'))
-        normalize_adapter(URI.parse(url).scheme)
+        Databases.normalize_adapter(URI.parse(url).scheme)
       end
     rescue URI::InvalidURIError
       nil

@@ -3,9 +3,13 @@
 require 'erb'
 require 'uri'
 require 'yaml'
+require_relative 'databases/base'
+require_relative 'yaml_access'
 
 module KamalBackup
   class RailsApp
+    include YamlAccess
+
     DEVELOPMENT_ENV = 'development'
 
     def initialize(cwd:)
@@ -53,7 +57,7 @@ module KamalBackup
           'DATABASE_URL' => url.to_s
         }.compact
       else
-        case normalize_adapter(fetch(config, :adapter))
+        case Databases.normalize_adapter(fetch(config, :adapter))
         when 'postgres'
           {
             'DATABASE_ADAPTER' => 'postgres',
@@ -107,7 +111,7 @@ module KamalBackup
     end
 
     def adapter_from_url(url)
-      normalize_adapter(URI.parse(url.to_s).scheme)
+      Databases.normalize_adapter(URI.parse(url.to_s).scheme)
     rescue URI::InvalidURIError
       nil
     end
@@ -125,21 +129,6 @@ module KamalBackup
       end
     rescue Psych::SyntaxError => e
       raise ConfigurationError, "invalid YAML in #{path}: #{e.message}"
-    end
-
-    def fetch(hash, key)
-      hash[key] || hash[key.to_s] || hash[key.to_sym]
-    end
-
-    def normalize_adapter(value)
-      case value.to_s.downcase
-      when 'postgres', 'postgresql'
-        'postgres'
-      when 'mysql', 'mysql2', 'mariadb'
-        'mysql'
-      when 'sqlite', 'sqlite3'
-        'sqlite'
-      end
     end
 
     def database_config_path

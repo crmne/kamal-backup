@@ -39,7 +39,7 @@ class DatabaseAdaptersTest < Minitest::Test
       'DATABASE_ADAPTER' => 'postgres',
       'DATABASE_URL' => 'postgres://app:secret@db/app'
     ))
-    adapter = KamalBackup::Databases::Postgres.new(config, redactor: redactor)
+    adapter = KamalBackup::Databases::Postgres.new(config.databases.first, redactor: redactor)
 
     assert_equal 'databases/chatwithwork/app/postgres.pgdump', adapter.database_filename
     assert_equal ['type:database', 'database:app', 'adapter:postgres'], adapter.backup_tags
