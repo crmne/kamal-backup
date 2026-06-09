@@ -12,6 +12,21 @@ module KamalBackup
     DEFAULT_CONFIG_FILE = 'config/deploy.yml'
     VERSION_LINE_PATTERN = /\A\d+(?:\.\d+)+(?:[-.][A-Za-z0-9]+)*\z/
 
+    class FilteringIO
+      def initialize(io, &reject)
+        @io = io
+        @reject = reject
+      end
+
+      def print(output)
+        @io.print(output) unless @reject.call(output.to_s)
+      end
+
+      def flush
+        @io.flush if @io.respond_to?(:flush)
+      end
+    end
+
     def initialize(redactor:, config_file: nil, destination: nil, env: ENV, cwd: Dir.pwd, stdout: $stdout,
                    stderr: $stderr)
       @redactor = redactor
@@ -329,21 +344,6 @@ module KamalBackup
       return unless !service_with_version.empty? && !version.empty? && service_with_version.end_with?(suffix)
 
       service_with_version.delete_suffix(suffix)
-    end
-
-    class FilteringIO
-      def initialize(io, &reject)
-        @io = io
-        @reject = reject
-      end
-
-      def print(output)
-        @io.print(output) unless @reject.call(output.to_s)
-      end
-
-      def flush
-        @io.flush if @io.respond_to?(:flush)
-      end
     end
 
     def kamal_stream_env(stream)

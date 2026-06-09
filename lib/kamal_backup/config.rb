@@ -426,54 +426,6 @@ module KamalBackup
       end
     end
 
-    def validate_restic_repository(check_files:)
-      return if restic_repository
-
-      if (path = restic_repository_file)
-        raise ConfigurationError, "RESTIC_REPOSITORY_FILE does not exist: #{path}" if check_files && !File.file?(path)
-
-        return
-      end
-
-      raise ConfigurationError, 'RESTIC_REPOSITORY or RESTIC_REPOSITORY_FILE is required'
-    end
-
-    def validate_restic_password(check_files:)
-      return if restic_password || restic_password_command
-
-      if (path = restic_password_file)
-        raise ConfigurationError, "RESTIC_PASSWORD_FILE does not exist: #{path}" if check_files && !File.file?(path)
-
-        return
-      end
-
-      raise ConfigurationError, 'RESTIC_PASSWORD, RESTIC_PASSWORD_FILE, or RESTIC_PASSWORD_COMMAND is required'
-    end
-
-    def validate_local_machine_environment
-      if (environment = local_restore_environment)
-        key, value = environment
-
-        if production_environment?(value)
-          raise ConfigurationError,
-                "restore local refuses to run with #{key}=#{value}; unset #{key} or use restore production"
-        end
-      end
-    end
-
-    def validate_local_machine_paths
-      path_pairs = local_restore_path_pairs
-
-      path_pairs.each do |path_pair|
-        target_path = path_pair.last
-        expanded = File.expand_path(target_path)
-        if SUSPICIOUS_BACKUP_PATHS.include?(expanded) && !allow_suspicious_backup_paths?
-          raise ConfigurationError,
-                "refusing suspicious local restore path #{expanded}; set KAMAL_BACKUP_ALLOW_SUSPICIOUS_PATHS=true to override"
-        end
-      end
-    end
-
     def integer(key, default, minimum:)
       raw = value(key)
       number = raw ? Integer(raw) : default
@@ -484,8 +436,18 @@ module KamalBackup
       raise ConfigurationError, "#{key} must be an integer"
     end
 
-    def database_definitions?
-      !@database_definitions.nil?
+    def legacy_backup_paths
+      split_paths(value('BACKUP_PATHS'))
+    end
+
+    def legacy_local_restore_source_paths
+      if (raw = value('LOCAL_RESTORE_SOURCE_PATHS'))
+        split_paths(raw)
+      end
+    end
+
+    def split_paths(raw)
+      raw.to_s.split(/[\n:]+/).map(&:strip).reject(&:empty?)
     end
 
     def path_definitions?
@@ -522,6 +484,10 @@ module KamalBackup
       expanded_child == expanded_parent || expanded_child.start_with?("#{expanded_parent}/")
     end
 
+    def database_definitions?
+      !@database_definitions.nil?
+    end
+
     def legacy_database_adapter
       if (explicit = value('DATABASE_ADAPTER'))
         Databases.normalize_adapter(explicit)
@@ -538,6 +504,64 @@ module KamalBackup
       end
     rescue URI::InvalidURIError
       nil
+    end
+
+    def validate_restic_repository(check_files:)
+      return if restic_repository
+
+      if (path = restic_repository_file)
+        raise ConfigurationError, "RESTIC_REPOSITORY_FILE does not exist: #{path}" if check_files && !File.file?(path)
+
+        return
+      end
+
+      raise ConfigurationError, 'RESTIC_REPOSITORY or RESTIC_REPOSITORY_FILE is required'
+    end
+
+    def validate_restic_password(check_files:)
+      return if restic_password || restic_password_command
+
+      if (path = restic_password_file)
+        raise ConfigurationError, "RESTIC_PASSWORD_FILE does not exist: #{path}" if check_files && !File.file?(path)
+
+        return
+      end
+
+      raise ConfigurationError, 'RESTIC_PASSWORD, RESTIC_PASSWORD_FILE, or RESTIC_PASSWORD_COMMAND is required'
+    end
+
+    def validate_local_machine_environment
+      if (environment = local_restore_environment)
+        key, value = environment
+
+        if production_environment?(value)
+          raise ConfigurationError,
+                "restore local refuses to run with #{key}=#{value}; unset #{key} or use restore production"
+        end
+      end
+    end
+
+    def local_restore_environment
+      %w[RAILS_ENV RACK_ENV APP_ENV KAMAL_ENVIRONMENT].each do |key|
+        return [key, value(key)] if value(key)
+      end
+    end
+
+    def production_environment?(value)
+      %w[production prod live].include?(value.to_s.downcase)
+    end
+
+    def validate_local_machine_paths
+      path_pairs = local_restore_path_pairs
+
+      path_pairs.each do |path_pair|
+        target_path = path_pair.last
+        expanded = File.expand_path(target_path)
+        if SUSPICIOUS_BACKUP_PATHS.include?(expanded) && !allow_suspicious_backup_paths?
+          raise ConfigurationError,
+                "refusing suspicious local restore path #{expanded}; set KAMAL_BACKUP_ALLOW_SUSPICIOUS_PATHS=true to override"
+        end
+      end
     end
 
     def in_place_file_restore?(expanded_target)
@@ -557,30 +581,6 @@ module KamalBackup
           database.value('MARIADB_DATABASE')
         ]
       end.compact
-    end
-
-    def legacy_backup_paths
-      split_paths(value('BACKUP_PATHS'))
-    end
-
-    def legacy_local_restore_source_paths
-      if (raw = value('LOCAL_RESTORE_SOURCE_PATHS'))
-        split_paths(raw)
-      end
-    end
-
-    def split_paths(raw)
-      raw.to_s.split(/[\n:]+/).map(&:strip).reject(&:empty?)
-    end
-
-    def local_restore_environment
-      %w[RAILS_ENV RACK_ENV APP_ENV KAMAL_ENVIRONMENT].each do |key|
-        return [key, value(key)] if value(key)
-      end
-    end
-
-    def production_environment?(value)
-      %w[production prod live].include?(value.to_s.downcase)
     end
 
     def production_named_target?(target)

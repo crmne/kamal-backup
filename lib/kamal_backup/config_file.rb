@@ -103,17 +103,6 @@ module KamalBackup
             "#{@path} contains unknown key #{key.inspect}; expected #{TOP_LEVEL_KEYS.join(', ')}"
     end
 
-    def normalize_value(raw_value)
-      case raw_value
-      when Array
-        raw_value.map(&:to_s).join("\n")
-      when NilClass
-        nil
-      else
-        raw_value.to_s
-      end
-    end
-
     def databases(raw_value)
       entries = require_array(raw_value, "#{@path} databases")
       entries.map.with_index(1) do |entry, index|
@@ -151,101 +140,6 @@ module KamalBackup
         sqlite_path = hash.key?('path') ? hash['path'] : hash['database']
         sqlite_path ? [['SQLITE_DATABASE_PATH', sqlite_path, "#{context}.path"]] : []
       end
-    end
-
-    def restic_env(raw_value)
-      hash = require_mapping(raw_value, "#{@path} restic")
-      env = {}
-
-      env['RESTIC_REPOSITORY'] = resolve_value(hash['repository'], context: "#{@path} restic.repository") if hash.key?('repository')
-      env['RESTIC_REPOSITORY_FILE'] = normalize_value(hash['repository_file']) if hash.key?('repository_file')
-      env.merge!(restic_password_env(hash['password'])) if hash.key?('password')
-      env.merge!(restic_rest_env(hash['rest'])) if hash.key?('rest')
-
-      {
-        'init_if_missing' => 'RESTIC_INIT_IF_MISSING',
-        'check_after_backup' => 'RESTIC_CHECK_AFTER_BACKUP',
-        'check_read_data_subset' => 'RESTIC_CHECK_READ_DATA_SUBSET',
-        'forget_after_backup' => 'RESTIC_FORGET_AFTER_BACKUP'
-      }.each do |source, target|
-        env[target] = normalize_value(hash[source]) if hash.key?(source)
-      end
-
-      env.merge!(retention_env(hash['retention'])) if hash.key?('retention')
-      env.compact
-    end
-
-    def retention_env(raw_value)
-      retention = require_mapping(raw_value, "#{@path} restic.retention")
-
-      {
-        'keep_last' => 'RESTIC_KEEP_LAST',
-        'keep_daily' => 'RESTIC_KEEP_DAILY',
-        'keep_weekly' => 'RESTIC_KEEP_WEEKLY',
-        'keep_monthly' => 'RESTIC_KEEP_MONTHLY',
-        'keep_yearly' => 'RESTIC_KEEP_YEARLY'
-      }.each_with_object({}) do |(source, target), env|
-        env[target] = normalize_value(retention[source]) if retention.key?(source)
-      end
-    end
-
-    def restic_password_env(raw_value)
-      case raw_value
-      when Hash
-        hash = stringify_keys(raw_value)
-        if hash.key?('secret')
-          { 'RESTIC_PASSWORD' => resolve_value(hash, context: "#{@path} restic.password") }
-        elsif hash.key?('file')
-          { 'RESTIC_PASSWORD_FILE' => normalize_value(hash['file']) }
-        elsif hash.key?('command')
-          { 'RESTIC_PASSWORD_COMMAND' => normalize_value(hash['command']) }
-        else
-          raise ConfigurationError, "#{@path} restic.password must use secret, file, or command"
-        end
-      else
-        { 'RESTIC_PASSWORD' => normalize_value(raw_value) }
-      end
-    end
-
-    def restic_rest_env(raw_value)
-      hash = require_mapping(raw_value, "#{@path} restic.rest")
-      env = {}
-      username = hash.key?('username') ? hash['username'] : hash['user']
-
-      env['RESTIC_REST_USERNAME'] = resolve_value(username, context: "#{@path} restic.rest.username") if username
-      env['RESTIC_REST_PASSWORD'] = resolve_value(hash['password'], context: "#{@path} restic.rest.password") if hash.key?('password')
-      env.compact
-    end
-
-    def backup_env(raw_value)
-      hash = require_mapping(raw_value, "#{@path} backup")
-      env = {}
-      env['BACKUP_SCHEDULE_SECONDS'] = normalize_duration(hash['schedule'], "#{@path} backup.schedule") if hash.key?('schedule')
-      env.compact
-    end
-
-    def state_env(raw_value)
-      hash = require_mapping(raw_value, "#{@path} state")
-      env = {}
-      env['KAMAL_BACKUP_STATE_DIR'] = normalize_value(hash['path']) if hash.key?('path')
-      env.compact
-    end
-
-    def path_list(raw_value, context)
-      case raw_value
-      when Array
-        raw_value.map { |path| path_string(path, context) }.reject(&:empty?)
-      when NilClass
-        []
-      else
-        [path_string(raw_value, context)].reject(&:empty?)
-      end
-    end
-
-    def path_string(raw_value, context)
-      raise ConfigurationError, "#{context} entries must be path strings" if raw_value.is_a?(Hash) || raw_value.is_a?(Array)
-
-      normalize_value(raw_value)
     end
 
     def backup_path_definitions(raw_value, context)
@@ -292,6 +186,121 @@ module KamalBackup
       end
     end
 
+    def path_list(raw_value, context)
+      case raw_value
+      when Array
+        raw_value.map { |path| path_string(path, context) }.reject(&:empty?)
+      when NilClass
+        []
+      else
+        [path_string(raw_value, context)].reject(&:empty?)
+      end
+    end
+
+    def path_string(raw_value, context)
+      raise ConfigurationError, "#{context} entries must be path strings" if raw_value.is_a?(Hash) || raw_value.is_a?(Array)
+
+      normalize_value(raw_value)
+    end
+
+    def restic_env(raw_value)
+      hash = require_mapping(raw_value, "#{@path} restic")
+      env = {}
+
+      env['RESTIC_REPOSITORY'] = resolve_value(hash['repository'], context: "#{@path} restic.repository") if hash.key?('repository')
+      env['RESTIC_REPOSITORY_FILE'] = normalize_value(hash['repository_file']) if hash.key?('repository_file')
+      env.merge!(restic_password_env(hash['password'])) if hash.key?('password')
+      env.merge!(restic_rest_env(hash['rest'])) if hash.key?('rest')
+
+      {
+        'init_if_missing' => 'RESTIC_INIT_IF_MISSING',
+        'check_after_backup' => 'RESTIC_CHECK_AFTER_BACKUP',
+        'check_read_data_subset' => 'RESTIC_CHECK_READ_DATA_SUBSET',
+        'forget_after_backup' => 'RESTIC_FORGET_AFTER_BACKUP'
+      }.each do |source, target|
+        env[target] = normalize_value(hash[source]) if hash.key?(source)
+      end
+
+      env.merge!(retention_env(hash['retention'])) if hash.key?('retention')
+      env.compact
+    end
+
+    def restic_password_env(raw_value)
+      case raw_value
+      when Hash
+        hash = stringify_keys(raw_value)
+        if hash.key?('secret')
+          { 'RESTIC_PASSWORD' => resolve_value(hash, context: "#{@path} restic.password") }
+        elsif hash.key?('file')
+          { 'RESTIC_PASSWORD_FILE' => normalize_value(hash['file']) }
+        elsif hash.key?('command')
+          { 'RESTIC_PASSWORD_COMMAND' => normalize_value(hash['command']) }
+        else
+          raise ConfigurationError, "#{@path} restic.password must use secret, file, or command"
+        end
+      else
+        { 'RESTIC_PASSWORD' => normalize_value(raw_value) }
+      end
+    end
+
+    def restic_rest_env(raw_value)
+      hash = require_mapping(raw_value, "#{@path} restic.rest")
+      env = {}
+      username = hash.key?('username') ? hash['username'] : hash['user']
+
+      env['RESTIC_REST_USERNAME'] = resolve_value(username, context: "#{@path} restic.rest.username") if username
+      env['RESTIC_REST_PASSWORD'] = resolve_value(hash['password'], context: "#{@path} restic.rest.password") if hash.key?('password')
+      env.compact
+    end
+
+    def retention_env(raw_value)
+      retention = require_mapping(raw_value, "#{@path} restic.retention")
+
+      {
+        'keep_last' => 'RESTIC_KEEP_LAST',
+        'keep_daily' => 'RESTIC_KEEP_DAILY',
+        'keep_weekly' => 'RESTIC_KEEP_WEEKLY',
+        'keep_monthly' => 'RESTIC_KEEP_MONTHLY',
+        'keep_yearly' => 'RESTIC_KEEP_YEARLY'
+      }.each_with_object({}) do |(source, target), env|
+        env[target] = normalize_value(retention[source]) if retention.key?(source)
+      end
+    end
+
+    def backup_env(raw_value)
+      hash = require_mapping(raw_value, "#{@path} backup")
+      env = {}
+      env['BACKUP_SCHEDULE_SECONDS'] = normalize_duration(hash['schedule'], "#{@path} backup.schedule") if hash.key?('schedule')
+      env.compact
+    end
+
+    def normalize_duration(raw_value, context)
+      value = normalize_value(raw_value)
+      raise ConfigurationError, "#{context} is required" if value.to_s.empty?
+
+      return value if value.match?(/\A\d+\z/)
+
+      match = value.match(/\A(\d+)\s*([smhdw])\z/i)
+      raise ConfigurationError, "#{context} must be seconds or a duration like 30m, 6h, or 1d" unless match
+
+      amount = match[1].to_i
+      multiplier = {
+        's' => 1,
+        'm' => 60,
+        'h' => 3600,
+        'd' => 86_400,
+        'w' => 604_800
+      }.fetch(match[2].downcase)
+      (amount * multiplier).to_s
+    end
+
+    def state_env(raw_value)
+      hash = require_mapping(raw_value, "#{@path} state")
+      env = {}
+      env['KAMAL_BACKUP_STATE_DIR'] = normalize_value(hash['path']) if hash.key?('path')
+      env.compact
+    end
+
     def resolve_value(raw_value, context:)
       case raw_value
       when Hash
@@ -315,24 +324,15 @@ module KamalBackup
       @env[secret_name].to_s.strip.empty? ? [secret_name] : []
     end
 
-    def normalize_duration(raw_value, context)
-      value = normalize_value(raw_value)
-      raise ConfigurationError, "#{context} is required" if value.to_s.empty?
-
-      return value if value.match?(/\A\d+\z/)
-
-      match = value.match(/\A(\d+)\s*([smhdw])\z/i)
-      raise ConfigurationError, "#{context} must be seconds or a duration like 30m, 6h, or 1d" unless match
-
-      amount = match[1].to_i
-      multiplier = {
-        's' => 1,
-        'm' => 60,
-        'h' => 3600,
-        'd' => 86_400,
-        'w' => 604_800
-      }.fetch(match[2].downcase)
-      (amount * multiplier).to_s
+    def normalize_value(raw_value)
+      case raw_value
+      when Array
+        raw_value.map(&:to_s).join("\n")
+      when NilClass
+        nil
+      else
+        raw_value.to_s
+      end
     end
 
     def require_array(value, context)

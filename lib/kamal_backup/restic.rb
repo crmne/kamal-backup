@@ -204,6 +204,8 @@ module KamalBackup
       run(['restore', snapshot, '--target', target])
     end
 
+    private
+
     def run(args, log_output: true)
       Command.capture(
         CommandSpec.new(argv: ['restic'] + args, env: restic_env),
@@ -216,7 +218,26 @@ module KamalBackup
       ['kamal-backup', "app:#{config.app_name}"]
     end
 
-    private
+    def host_args
+      ['--host', restic_host]
+    end
+
+    def restic_host
+      normalize_restic_host([config.app_name, config.accessory_name || 'backup'].compact.join('-'))
+    end
+
+    def normalize_restic_host(value)
+      normalized = value.to_s.gsub(/[^A-Za-z0-9_.-]+/, '-').gsub(/\A-+|-+\z/, '')
+      normalized.empty? ? 'kamal-backup' : normalized
+    end
+
+    def tag_args(tags)
+      tags.compact.each_with_object([]) { |tag, args| args.concat(['--tag', tag]) }
+    end
+
+    def exclude_args(patterns)
+      patterns.compact.each_with_object([]) { |pattern, args| args.concat(['--exclude', pattern]) }
+    end
 
     def retention_tag_sets
       database_retention_tag_sets + file_retention_tag_sets
@@ -244,25 +265,13 @@ module KamalBackup
       tags.reject { |tag| tag == 'kamal-backup' || tag.start_with?('app:') }.join(', ')
     end
 
-    def tag_args(tags)
-      tags.compact.each_with_object([]) { |tag, args| args.concat(['--tag', tag]) }
-    end
-
-    def exclude_args(patterns)
-      patterns.compact.each_with_object([]) { |pattern, args| args.concat(['--exclude', pattern]) }
-    end
-
-    def host_args
-      ['--host', restic_host]
-    end
-
-    def restic_host
-      normalize_restic_host([config.app_name, config.accessory_name || 'backup'].compact.join('-'))
-    end
-
-    def normalize_restic_host(value)
-      normalized = value.to_s.gsub(/[^A-Za-z0-9_.-]+/, '-').gsub(/\A-+|-+\z/, '')
-      normalized.empty? ? 'kamal-backup' : normalized
+    def write_last_check(payload)
+      FileUtils.mkdir_p(config.state_dir)
+      File.write(config.last_check_path, JSON.pretty_generate(payload.transform_values do |value|
+        value.respond_to?(:iso8601) ? value.iso8601 : redactor.redact_string(value.to_s)
+      end))
+    rescue SystemCallError
+      nil
     end
 
     def filter_tag_args(tags)
@@ -354,15 +363,6 @@ module KamalBackup
         stdout: redactor.redact_string(stdout),
         stderr: redactor.redact_string(stderr)
       )
-    end
-
-    def write_last_check(payload)
-      FileUtils.mkdir_p(config.state_dir)
-      File.write(config.last_check_path, JSON.pretty_generate(payload.transform_values do |value|
-        value.respond_to?(:iso8601) ? value.iso8601 : redactor.redact_string(value.to_s)
-      end))
-    rescue SystemCallError
-      nil
     end
 
     def log(message)

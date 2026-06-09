@@ -164,89 +164,6 @@ module KamalBackup
       end
     end
 
-    def build_restore_result(scope, snapshot)
-      started_at = Time.now.utc
-      result = Schema.record(
-        kind: 'restore_result',
-        status: 'ok',
-        scope: scope,
-        requested_snapshot: snapshot,
-        started_at: started_at.iso8601,
-        finished_at: nil,
-        error: nil,
-        databases: [],
-        files: nil
-      )
-      yield(result)
-      result[:finished_at] = Time.now.utc.iso8601
-      result
-    end
-
-    def run_drill(scope, snapshot, check_command:)
-      started_at = Time.now.utc
-      result = Schema.record(
-        kind: 'drill_result',
-        status: 'ok',
-        scope: scope,
-        operator: drill_operator,
-        requested_snapshot: snapshot,
-        started_at: started_at.iso8601,
-        finished_at: nil,
-        error: nil,
-        databases: [],
-        files: nil,
-        check: nil
-      )
-
-      begin
-        yield(result)
-
-        if check_command
-          result[:check] = run_drill_check(check_command)
-
-          if result[:check][:status] == 'failed'
-            result[:status] = 'failed'
-            result[:error] = result[:check][:error]
-          end
-        end
-      rescue StandardError => e
-        result[:status] = 'failed'
-        result[:error] = redactor.redact_string(e.message)
-      ensure
-        result[:finished_at] = Time.now.utc.iso8601
-        write_last_restore_drill(result)
-      end
-
-      result
-    end
-
-    def perform_database_restore_to_current(snapshot, adapter:)
-      resolved_snapshot = resolve_snapshot(snapshot, tags: database_snapshot_tags(adapter))
-      filename = restic.database_file(resolved_snapshot, adapter.adapter_name,
-                                      database_name: database_config_name(adapter))
-
-      raise ConfigurationError, "could not find database backup file in snapshot #{resolved_snapshot}" unless filename
-
-      adapter.restore_to_current(restic, resolved_snapshot, filename)
-      summarize_database_restore(adapter, resolved_snapshot, filename, adapter.current_target_identifier)
-    end
-
-    def perform_database_restore_to_scratch(snapshot, adapter:, database_name:, sqlite_path:)
-      target = scratch_database_target(adapter, database_name, sqlite_path)
-      resolved_snapshot = resolve_snapshot(snapshot, tags: database_snapshot_tags(adapter))
-      filename = restic.database_file(resolved_snapshot, adapter.adapter_name,
-                                      database_name: database_config_name(adapter))
-
-      raise ConfigurationError, "could not find database backup file in snapshot #{resolved_snapshot}" unless filename
-
-      adapter.restore_to_scratch(restic, resolved_snapshot, filename, target: target)
-      summarize_database_restore(adapter, resolved_snapshot, filename, adapter.scratch_target_identifier(target))
-    end
-
-    def perform_database_restores_to_current(snapshot)
-      databases.map { |adapter| perform_database_restore_to_current(snapshot, adapter: adapter) }
-    end
-
     def backup_summary(started_at:, finished_at:)
       Schema.record(
         kind: 'backup_result',
@@ -309,23 +226,146 @@ module KamalBackup
       nil
     end
 
+    def build_restore_result(scope, snapshot)
+      started_at = Time.now.utc
+      result = Schema.record(
+        kind: 'restore_result',
+        status: 'ok',
+        scope: scope,
+        requested_snapshot: snapshot,
+        started_at: started_at.iso8601,
+        finished_at: nil,
+        error: nil,
+        databases: [],
+        files: nil
+      )
+      yield(result)
+      result[:finished_at] = Time.now.utc.iso8601
+      result
+    end
+
+    def run_drill(scope, snapshot, check_command:)
+      started_at = Time.now.utc
+      result = Schema.record(
+        kind: 'drill_result',
+        status: 'ok',
+        scope: scope,
+        operator: drill_operator,
+        requested_snapshot: snapshot,
+        started_at: started_at.iso8601,
+        finished_at: nil,
+        error: nil,
+        databases: [],
+        files: nil,
+        check: nil
+      )
+
+      begin
+        yield(result)
+
+        if check_command
+          result[:check] = run_drill_check(check_command)
+
+          if result[:check][:status] == 'failed'
+            result[:status] = 'failed'
+            result[:error] = result[:check][:error]
+          end
+        end
+      rescue StandardError => e
+        result[:status] = 'failed'
+        result[:error] = redactor.redact_string(e.message)
+      ensure
+        result[:finished_at] = Time.now.utc.iso8601
+        write_last_restore_drill(result)
+      end
+
+      result
+    end
+
+    def drill_operator
+      config.value('USER') || config.value('USERNAME')
+    end
+
+    def run_drill_check(command)
+      result = Command.capture(
+        CommandSpec.new(argv: ['sh', '-lc', command]),
+        redactor: redactor
+      )
+      output = result.stdout.empty? ? result.stderr : result.stdout
+
+      {
+        status: 'ok',
+        command: redactor.redact_string(command),
+        output: redactor.redact_string(output.strip)
+      }
+    rescue CommandError => e
+      {
+        status: 'failed',
+        command: redactor.redact_string(command),
+        error: redactor.redact_string(e.message)
+      }
+    end
+
+    def write_last_restore_drill(payload)
+      FileUtils.mkdir_p(config.state_dir)
+      File.write(config.last_restore_drill_path, JSON.pretty_generate(payload))
+    rescue SystemCallError
+      nil
+    end
+
+    def perform_database_restores_to_current(snapshot)
+      databases.map { |adapter| perform_database_restore_to_current(snapshot, adapter: adapter) }
+    end
+
+    def perform_database_restore_to_current(snapshot, adapter:)
+      resolved_snapshot = resolve_snapshot(snapshot, tags: database_snapshot_tags(adapter))
+      filename = restic.database_file(resolved_snapshot, adapter.adapter_name,
+                                      database_name: database_config_name(adapter))
+
+      raise ConfigurationError, "could not find database backup file in snapshot #{resolved_snapshot}" unless filename
+
+      adapter.restore_to_current(restic, resolved_snapshot, filename)
+      summarize_database_restore(adapter, resolved_snapshot, filename, adapter.current_target_identifier)
+    end
+
+    def perform_database_restore_to_scratch(snapshot, adapter:, database_name:, sqlite_path:)
+      target = scratch_database_target(adapter, database_name, sqlite_path)
+      resolved_snapshot = resolve_snapshot(snapshot, tags: database_snapshot_tags(adapter))
+      filename = restic.database_file(resolved_snapshot, adapter.adapter_name,
+                                      database_name: database_config_name(adapter))
+
+      raise ConfigurationError, "could not find database backup file in snapshot #{resolved_snapshot}" unless filename
+
+      adapter.restore_to_scratch(restic, resolved_snapshot, filename, target: target)
+      summarize_database_restore(adapter, resolved_snapshot, filename, adapter.scratch_target_identifier(target))
+    end
+
+    def scratch_database_target(adapter, database_name, sqlite_path)
+      case adapter.adapter_name
+      when 'sqlite'
+        target = sqlite_path || raise(ConfigurationError, 'scratch SQLite path is required')
+        databases.size > 1 ? File.join(target, "#{database_config_name(adapter)}.sqlite3") : target
+      else
+        target = database_name || raise(ConfigurationError, 'scratch database name is required')
+        databases.size > 1 ? "#{target}_#{database_config_name(adapter)}" : target
+      end
+    end
+
+    def summarize_database_restore(adapter, snapshot, filename, target)
+      {
+        snapshot: snapshot,
+        adapter: adapter.adapter_name,
+        filename: filename,
+        target: redactor.redact_string(target.to_s)
+      }
+    end
+
     def database_snapshot_tags(adapter)
       ['type:database', "database:#{database_config_name(adapter)}", "adapter:#{adapter.adapter_name}"]
     end
 
     def database_config_name(adapter)
       adapter.config.database_name
-    end
-
-    def perform_file_restore(snapshot, target:)
-      resolved_snapshot = resolve_snapshot(snapshot, tags: ['type:files'])
-      validated_target = config.validate_file_restore_target(target)
-      restic.restore_snapshot(resolved_snapshot, validated_target)
-
-      {
-        snapshot: resolved_snapshot,
-        target: validated_target
-      }
     end
 
     def perform_replacement_file_restore(snapshot, production_source:)
@@ -365,24 +405,15 @@ module KamalBackup
       File.join(stage_dir, path.to_s.sub(%r{\A/+}, ''))
     end
 
-    def summarize_database_restore(adapter, snapshot, filename, target)
-      {
-        snapshot: snapshot,
-        adapter: adapter.adapter_name,
-        filename: filename,
-        target: redactor.redact_string(target.to_s)
-      }
-    end
+    def perform_file_restore(snapshot, target:)
+      resolved_snapshot = resolve_snapshot(snapshot, tags: ['type:files'])
+      validated_target = config.validate_file_restore_target(target)
+      restic.restore_snapshot(resolved_snapshot, validated_target)
 
-    def scratch_database_target(adapter, database_name, sqlite_path)
-      case adapter.adapter_name
-      when 'sqlite'
-        target = sqlite_path || raise(ConfigurationError, 'scratch SQLite path is required')
-        databases.size > 1 ? File.join(target, "#{database_config_name(adapter)}.sqlite3") : target
-      else
-        target = database_name || raise(ConfigurationError, 'scratch database name is required')
-        databases.size > 1 ? "#{target}_#{database_config_name(adapter)}" : target
-      end
+      {
+        snapshot: resolved_snapshot,
+        target: validated_target
+      }
     end
 
     def validate_local_machine_restore
@@ -414,37 +445,6 @@ module KamalBackup
 
     def validate_local_machine_database_target(adapter)
       config.validate_local_database_restore_target(adapter.current_target_identifier)
-    end
-
-    def run_drill_check(command)
-      result = Command.capture(
-        CommandSpec.new(argv: ['sh', '-lc', command]),
-        redactor: redactor
-      )
-      output = result.stdout.empty? ? result.stderr : result.stdout
-
-      {
-        status: 'ok',
-        command: redactor.redact_string(command),
-        output: redactor.redact_string(output.strip)
-      }
-    rescue CommandError => e
-      {
-        status: 'failed',
-        command: redactor.redact_string(command),
-        error: redactor.redact_string(e.message)
-      }
-    end
-
-    def write_last_restore_drill(payload)
-      FileUtils.mkdir_p(config.state_dir)
-      File.write(config.last_restore_drill_path, JSON.pretty_generate(payload))
-    rescue SystemCallError
-      nil
-    end
-
-    def drill_operator
-      config.value('USER') || config.value('USERNAME')
     end
 
     def restic
