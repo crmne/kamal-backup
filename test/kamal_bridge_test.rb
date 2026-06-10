@@ -371,4 +371,168 @@ class KamalBridgeTest < Minitest::Test
       end
     end
   end
+
+  def with_kamal_config(config_yaml, secrets_output: '', env: {})
+    Dir.mktmpdir do |dir|
+      bridge = KamalBackup::KamalBridge.new(redactor: KamalBackup::Redactor.new(env: {}), cwd: dir, env: env)
+      responder = lambda do |spec|
+        stdout = spec.argv.include?('secrets') ? secrets_output : config_yaml
+        KamalBackup::CommandResult.new(stdout: stdout, stderr: '', status: 0)
+      end
+
+      stub_command_capture(responder) { yield bridge }
+    end
+  end
+
+  def test_accessory_name_infers_the_accessory_from_the_image
+    config_yaml = <<~YAML
+      accessories:
+        db_backup:
+          image: ghcr.io/crmne/kamal-backup:latest
+        redis:
+          image: redis:7
+    YAML
+
+    with_kamal_config(config_yaml) do |bridge|
+      assert_equal 'db_backup', bridge.accessory_name
+    end
+  end
+
+  def test_accessory_name_falls_back_to_the_backup_accessory
+    config_yaml = <<~YAML
+      accessories:
+        backup:
+          image: example/custom-image:latest
+        redis:
+          image: redis:7
+    YAML
+
+    with_kamal_config(config_yaml) do |bridge|
+      assert_equal 'backup', bridge.accessory_name
+    end
+  end
+
+  def test_accessory_name_raises_when_it_cannot_be_inferred
+    config_yaml = <<~YAML
+      accessories:
+        redis:
+          image: redis:7
+        search:
+          image: elastic:8
+    YAML
+
+    with_kamal_config(config_yaml) do |bridge|
+      error = assert_raises(KamalBackup::ConfigurationError) { bridge.accessory_name }
+      assert_includes error.message, 'redis, search'
+    end
+  end
+
+  def test_accessory_name_prefers_the_requested_accessory
+    config_yaml = <<~YAML
+      accessories:
+        custom:
+          image: example/custom-image:latest
+    YAML
+
+    with_kamal_config(config_yaml) do |bridge|
+      assert_equal 'custom', bridge.accessory_name(preferred: 'custom')
+    end
+  end
+
+  def test_accessory_name_raises_when_the_requested_accessory_is_missing
+    config_yaml = <<~YAML
+      accessories:
+        backup:
+          image: ghcr.io/crmne/kamal-backup:latest
+    YAML
+
+    with_kamal_config(config_yaml) do |bridge|
+      error = assert_raises(KamalBackup::ConfigurationError) { bridge.accessory_name(preferred: 'missing') }
+      assert_includes error.message, '"missing" is not defined'
+    end
+  end
+
+  def test_local_restore_defaults_come_from_the_accessory_clear_env
+    config_yaml = <<~YAML
+      accessories:
+        backup:
+          image: ghcr.io/crmne/kamal-backup:latest
+          env:
+            clear:
+              APP_NAME: demo
+              DATABASE_ADAPTER: sqlite
+              RESTIC_REPOSITORY: /repo
+              BACKUP_PATHS: /data/storage
+    YAML
+
+    with_kamal_config(config_yaml) do |bridge|
+      assert_equal(
+        {
+          'APP_NAME' => 'demo',
+          'DATABASE_ADAPTER' => 'sqlite',
+          'RESTIC_REPOSITORY' => '/repo',
+          'LOCAL_RESTORE_SOURCE_PATHS' => '/data/storage'
+        },
+        bridge.local_restore_defaults(accessory_name: 'backup')
+      )
+    end
+  end
+
+  def test_accessory_environment_resolves_secret_list_entries
+    config_yaml = <<~YAML
+      accessories:
+        backup:
+          image: ghcr.io/crmne/kamal-backup:latest
+          env:
+            clear:
+              APP_NAME: demo
+            secret:
+              - RESTIC_PASSWORD
+              - DB_PASSWORD:MY_DB_SECRET
+    YAML
+
+    with_kamal_config(
+      config_yaml,
+      secrets_output: "RESTIC_PASSWORD=from-secrets\n",
+      env: { 'MY_DB_SECRET' => 'from-process-env' }
+    ) do |bridge|
+      environment = bridge.accessory_environment(accessory_name: 'backup')
+
+      assert_equal 'demo', environment.fetch('APP_NAME')
+      assert_equal 'from-secrets', environment.fetch('RESTIC_PASSWORD')
+      assert_equal 'from-process-env', environment.fetch('DB_PASSWORD')
+    end
+  end
+
+  def test_accessory_environment_resolves_secret_hash_entries
+    config_yaml = <<~YAML
+      accessories:
+        backup:
+          image: ghcr.io/crmne/kamal-backup:latest
+          env:
+            secret:
+              RESTIC_PASSWORD: MY_RESTIC_SECRET
+    YAML
+
+    with_kamal_config(config_yaml, secrets_output: "MY_RESTIC_SECRET=resolved\n") do |bridge|
+      environment = bridge.accessory_environment(accessory_name: 'backup')
+
+      assert_equal 'resolved', environment.fetch('RESTIC_PASSWORD')
+    end
+  end
+
+  def test_accessory_environment_skips_unresolvable_secrets
+    config_yaml = <<~YAML
+      accessories:
+        backup:
+          image: ghcr.io/crmne/kamal-backup:latest
+          env:
+            secret:
+              - MISSING_SECRET
+    YAML
+
+    with_kamal_config(config_yaml) do |bridge|
+      assert_empty bridge.accessory_environment(accessory_name: 'backup')
+    end
+  end
 end

@@ -121,7 +121,7 @@ module KamalBackup
       accessories.fetch(accessory_name) do
         accessories.fetch(accessory_name.to_sym) do
           raise ConfigurationError,
-                "accessory #{accessory_name.inspect} is not defined in #{config_file || DEFAULT_CONFIG_FILE}"
+                "accessory #{accessory_name.inspect} is not defined in #{@config_file || DEFAULT_CONFIG_FILE}"
         end
       end
     end

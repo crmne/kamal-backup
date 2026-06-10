@@ -329,4 +329,311 @@ class ResticTest < Minitest::Test
       assert_equal 'rest-secret', restic_env.fetch('RESTIC_REST_PASSWORD')
     end
   end
+
+  class InitTrackingRestic < KamalBackup::Restic
+    attr_reader :calls
+
+    def initialize(config)
+      super(config, redactor: KamalBackup::Redactor.new(env: {}))
+      @calls = []
+    end
+
+    private
+
+    def run(args, **)
+      @calls << args
+      raise KamalBackup::CommandError.new('repository does not exist', command: nil, status: 10) if args.first == 'snapshots'
+
+      KamalBackup::CommandResult.new(stdout: '', stderr: '', status: 0)
+    end
+
+    def log(_message); end
+  end
+
+  def test_ensure_repository_runs_init_when_missing_and_enabled
+    config = KamalBackup::Config.new(env: base_env('RESTIC_INIT_IF_MISSING' => 'true'))
+    restic = InitTrackingRestic.new(config)
+
+    restic.ensure_repository
+
+    assert_equal [%w[snapshots --json], %w[init]], restic.calls
+  end
+
+  def test_ensure_repository_raises_when_init_is_disabled
+    config = KamalBackup::Config.new(env: base_env)
+    restic = InitTrackingRestic.new(config)
+
+    assert_raises(KamalBackup::CommandError) { restic.ensure_repository }
+    assert_equal [%w[snapshots --json]], restic.calls
+  end
+
+  class CheckRestic < KamalBackup::Restic
+    attr_accessor :fail_check
+    attr_reader :last_args
+
+    def initialize(config)
+      super(config, redactor: KamalBackup::Redactor.new(env: {}))
+    end
+
+    private
+
+    def run(args, **)
+      @last_args = args
+      raise KamalBackup::CommandError.new('check failed badly', command: nil, status: 1) if fail_check
+
+      KamalBackup::CommandResult.new(stdout: 'repository is healthy', stderr: '', status: 0)
+    end
+
+    def log(_message); end
+  end
+
+  def test_check_writes_ok_status_to_the_state_file
+    Dir.mktmpdir do |dir|
+      config = KamalBackup::Config.new(env: base_env('KAMAL_BACKUP_STATE_DIR' => dir))
+      restic = CheckRestic.new(config)
+
+      result = restic.check
+
+      assert_equal 'repository is healthy', result.stdout
+      state = JSON.parse(File.read(File.join(dir, 'last_check.json')))
+      assert_equal 'ok', state.fetch('status')
+      assert_includes state.fetch('output'), 'repository is healthy'
+    end
+  end
+
+  def test_check_records_failure_and_reraises
+    Dir.mktmpdir do |dir|
+      config = KamalBackup::Config.new(env: base_env('KAMAL_BACKUP_STATE_DIR' => dir))
+      restic = CheckRestic.new(config)
+      restic.fail_check = true
+
+      assert_raises(KamalBackup::CommandError) { restic.check }
+
+      state = JSON.parse(File.read(File.join(dir, 'last_check.json')))
+      assert_equal 'failed', state.fetch('status')
+      assert_includes state.fetch('error'), 'check failed badly'
+    end
+  end
+
+  def test_check_passes_read_data_subset_when_configured
+    Dir.mktmpdir do |dir|
+      config = KamalBackup::Config.new(env: base_env(
+        'KAMAL_BACKUP_STATE_DIR' => dir,
+        'RESTIC_CHECK_READ_DATA_SUBSET' => '10%'
+      ))
+      restic = CheckRestic.new(config)
+
+      restic.check
+
+      assert_equal ['check', '--read-data-subset', '10%'], restic.last_args
+    end
+  end
+
+  def test_check_succeeds_even_when_the_state_dir_is_not_writable
+    Dir.mktmpdir do |dir|
+      blocker = File.join(dir, 'not-a-dir')
+      File.write(blocker, '')
+      config = KamalBackup::Config.new(env: base_env('KAMAL_BACKUP_STATE_DIR' => File.join(blocker, 'state')))
+      restic = CheckRestic.new(config)
+
+      result = restic.check
+
+      assert_equal 0, result.status
+    end
+  end
+
+  def test_latest_snapshot_returns_nil_when_snapshot_output_is_not_json
+    config = KamalBackup::Config.new(env: base_env('APP_NAME' => 'demo'))
+    restic = FakeRestic.new(config, 'unable to open repository')
+
+    assert_nil restic.latest_snapshot(tags: ['type:database'])
+  end
+
+  def test_latest_snapshot_returns_nil_when_there_are_no_snapshots
+    config = KamalBackup::Config.new(env: base_env('APP_NAME' => 'demo'))
+    restic = FakeRestic.new(config, '[]')
+
+    assert_nil restic.latest_snapshot(tags: ['type:database'])
+  end
+
+  def plumbing_restic
+    config = KamalBackup::Config.new(env: base_env('APP_NAME' => 'demo'))
+    KamalBackup::Restic.new(config, redactor: KamalBackup::Redactor.new(env: {}))
+  end
+
+  def command_spec(argv)
+    KamalBackup::CommandSpec.new(argv: argv, env: {})
+  end
+
+  def pipe(producer_argv, consumer_argv)
+    plumbing_restic.send(
+      :pipe_commands,
+      command_spec(producer_argv),
+      command_spec(consumer_argv),
+      producer_label: 'producer',
+      consumer_label: 'consumer'
+    )
+  end
+
+  def test_pipe_commands_returns_the_consumer_output
+    result = pipe(%w[printf dump-data], ['cat'])
+
+    assert_equal 'dump-data', result.stdout
+    assert_equal 0, result.status
+  end
+
+  def test_pipe_commands_raises_when_the_producer_fails
+    error = assert_raises(KamalBackup::CommandError) do
+      pipe(['sh', '-c', 'echo producer-broke >&2; exit 3'], ['cat'])
+    end
+
+    assert_equal 3, error.status
+    assert_includes error.stderr, 'producer-broke'
+  end
+
+  def test_pipe_commands_raises_when_the_consumer_fails
+    error = assert_raises(KamalBackup::CommandError) do
+      pipe(%w[printf dump-data], ['sh', '-c', 'cat >/dev/null; echo consumer-broke >&2; exit 2'])
+    end
+
+    assert_equal 2, error.status
+    assert_includes error.stderr, 'consumer-broke'
+  end
+
+  def test_pipe_commands_reports_broken_pipes_between_producer_and_consumer
+    error = assert_raises(KamalBackup::CommandError) do
+      pipe(['sh', '-c', 'sleep 0.2; printf late-data'], ['true'])
+    end
+
+    assert_includes error.message, 'failed to pipe producer to consumer'
+  end
+
+  def test_pipe_commands_reports_a_missing_producer_command
+    error = assert_raises(KamalBackup::CommandError) do
+      pipe(['kamal-backup-test-no-such-producer'], ['cat'])
+    end
+
+    assert_equal 127, error.status
+    assert_includes error.message, 'command not found: kamal-backup-test-no-such-producer'
+  end
+
+  def test_pipe_commands_reports_a_missing_consumer_command
+    error = assert_raises(KamalBackup::CommandError) do
+      pipe(%w[printf dump-data], ['kamal-backup-test-no-such-consumer'])
+    end
+
+    assert_equal 127, error.status
+    assert_includes error.message, 'command not found: kamal-backup-test-no-such-consumer'
+  end
+
+  def with_fake_restic(script)
+    Dir.mktmpdir do |dir|
+      bin_dir = File.join(dir, 'bin')
+      FileUtils.mkdir_p(bin_dir)
+      fake_restic = File.join(bin_dir, 'restic')
+      File.write(fake_restic, script)
+      FileUtils.chmod('+x', fake_restic)
+      previous_path = ENV['PATH']
+      ENV['PATH'] = "#{bin_dir}#{File::PATH_SEPARATOR}#{previous_path}"
+      begin
+        yield dir
+      ensure
+        ENV['PATH'] = previous_path
+      end
+    end
+  end
+
+  def test_write_dump_to_path_writes_the_dump_atomically
+    with_fake_restic("#!/bin/sh\nprintf dump-bytes\n") do |dir|
+      target = File.join(dir, 'restore', 'database.dump')
+
+      written = plumbing_restic.write_dump_to_path('snap', 'database.dump', target)
+
+      assert_equal target, written
+      assert_equal 'dump-bytes', File.read(target)
+      assert_empty Dir.glob("#{target}*.tmp")
+    end
+  end
+
+  def test_write_dump_to_path_cleans_up_the_temp_file_when_restic_fails
+    with_fake_restic("#!/bin/sh\necho dump-broke >&2\nexit 1\n") do |dir|
+      target = File.join(dir, 'restore', 'database.dump')
+
+      error = assert_raises(KamalBackup::CommandError) do
+        plumbing_restic.write_dump_to_path('snap', 'database.dump', target)
+      end
+
+      assert_equal 1, error.status
+      refute_path_exists target
+      assert_empty Dir.glob(File.join(dir, 'restore', '*.tmp'))
+    end
+  end
+
+  def test_write_dump_to_path_reports_a_missing_restic_binary
+    Dir.mktmpdir do |dir|
+      empty_bin = File.join(dir, 'empty-bin')
+      FileUtils.mkdir_p(empty_bin)
+      previous_path = ENV['PATH']
+      ENV['PATH'] = empty_bin
+      begin
+        target = File.join(dir, 'database.dump')
+
+        error = assert_raises(KamalBackup::CommandError) do
+          plumbing_restic.write_dump_to_path('snap', 'database.dump', target)
+        end
+
+        assert_equal 127, error.status
+        assert_includes error.message, 'command not found: restic'
+      ensure
+        ENV['PATH'] = previous_path
+      end
+    end
+  end
+
+  def test_backup_file_reports_a_missing_restic_binary
+    Dir.mktmpdir do |dir|
+      source = File.join(dir, 'app.sqlite3')
+      File.write(source, 'data')
+      empty_bin = File.join(dir, 'empty-bin')
+      FileUtils.mkdir_p(empty_bin)
+      previous_path = ENV['PATH']
+      ENV['PATH'] = empty_bin
+      begin
+        error = assert_raises(KamalBackup::CommandError) do
+          plumbing_restic.backup_file(source, filename: 'databases/demo/app/sqlite.sqlite3', tags: ['type:database'])
+        end
+
+        assert_equal 127, error.status
+        assert_includes error.message, 'command not found: restic'
+      ensure
+        ENV['PATH'] = previous_path
+      end
+    end
+  end
+
+  def test_backup_file_reports_stream_errors_when_restic_exits_early_but_successfully
+    with_fake_restic("#!/bin/sh\nsleep 0.2\nexit 0\n") do |dir|
+      source = File.join(dir, 'large.sqlite3')
+      File.binwrite(source, 'x' * (16 * 1024 * 1024))
+
+      error = assert_raises(KamalBackup::CommandError) do
+        plumbing_restic.backup_file(source, filename: 'databases/demo/app/sqlite.sqlite3', tags: ['type:database'])
+      end
+
+      assert_includes error.message, 'failed to stream file'
+    end
+  end
+
+  def test_backup_file_returns_the_restic_result_on_success
+    with_fake_restic("#!/bin/sh\ncat >/dev/null\nprintf snapshot-saved\n") do |dir|
+      source = File.join(dir, 'app.sqlite3')
+      File.write(source, 'data')
+
+      result = plumbing_restic.backup_file(source, filename: 'databases/demo/app/sqlite.sqlite3',
+                                                   tags: ['type:database'])
+
+      assert_equal 0, result.status
+      assert_equal 'snapshot-saved', result.stdout
+    end
+  end
 end
