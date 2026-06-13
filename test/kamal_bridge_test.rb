@@ -36,7 +36,7 @@ class KamalBridgeTest < Minitest::Test
 
       stub_command_capture(KamalBackup::CommandResult.new(stdout: output, stderr: '', status: 0)) do |specs|
         assert_equal '0.1.2', bridge.remote_version(accessory_name: 'backup')
-        assert_equal ['kamal', 'accessory', 'exec', '--reuse', 'backup', 'kamal-backup version'], specs.first.argv
+        assert_equal ['kamal', 'accessory', 'exec', '--reuse', 'backup', 'kamal-backup', 'version'], specs.first.argv
       end
     end
   end
@@ -66,7 +66,8 @@ class KamalBridgeTest < Minitest::Test
           'production',
           '--reuse',
           'backup',
-          'kamal-backup version'
+          'kamal-backup',
+          'version'
         ], specs.first.argv
       end
     end
@@ -85,7 +86,7 @@ class KamalBridgeTest < Minitest::Test
       bridge = KamalBackup::KamalBridge.new(redactor: KamalBackup::Redactor.new(env: {}), cwd: dir)
 
       assert_equal '0.2.5', bridge.remote_version(accessory_name: 'backup')
-      assert_equal ['kamal', 'accessory', 'exec', '--reuse', 'backup', 'kamal-backup version'],
+      assert_equal ['kamal', 'accessory', 'exec', '--reuse', 'backup', 'kamal-backup', 'version'],
                    calls.first.fetch(:spec).argv
       assert_equal true, calls.first.fetch(:kwargs).fetch(:log)
       assert_equal false, calls.first.fetch(:kwargs).fetch(:log_output)
@@ -118,13 +119,13 @@ class KamalBridgeTest < Minitest::Test
       )
 
       result = KamalBackup::Command.with_output(output) do
-        bridge.execute_on_accessory(accessory_name: 'backup', command: 'kamal-backup backup', stream: true)
+        bridge.execute_on_accessory(accessory_name: 'backup', command: 'kamal-backup backup --force', stream: true)
       end
 
       assert result.streamed
       assert_equal "kamal stdout\n", out.string
       assert_equal "kamal stderr\n", err.string
-      assert_equal ['kamal', 'accessory', 'exec', '--reuse', 'backup', 'kamal-backup backup'],
+      assert_equal ['kamal', 'accessory', 'exec', '--reuse', 'backup', 'kamal-backup', 'backup', '--force'],
                    calls.first.fetch(:spec).argv
       assert_equal false, calls.first.fetch(:kwargs).fetch(:log)
       assert_equal false, calls.first.fetch(:kwargs).fetch(:log_output)
@@ -133,6 +134,33 @@ class KamalBridgeTest < Minitest::Test
     end
   ensure
     KamalBackup::Command.define_singleton_method(:capture) { |*args, **kwargs, &block| original.call(*args, **kwargs, &block) }
+  end
+
+  def test_accessory_exec_preserves_remote_arguments_with_spaces
+    Dir.mktmpdir do |dir|
+      bridge = KamalBackup::KamalBridge.new(redactor: KamalBackup::Redactor.new(env: {}), cwd: dir)
+
+      stub_command_capture(KamalBackup::CommandResult.new(stdout: "ok\n", stderr: '', status: 0)) do |specs|
+        bridge.execute_on_accessory(
+          accessory_name: 'backup',
+          command: ['kamal-backup', 'drill', 'production', 'latest', '--check', 'printf verified']
+        )
+
+        assert_equal [
+          'kamal',
+          'accessory',
+          'exec',
+          '--reuse',
+          'backup',
+          'kamal-backup',
+          'drill',
+          'production',
+          'latest',
+          '--check',
+          'printf\ verified'
+        ], specs.first.argv
+      end
+    end
   end
 
   def test_streamed_accessory_exec_forces_sshkit_color_when_output_is_tty
@@ -229,7 +257,7 @@ class KamalBridgeTest < Minitest::Test
 
       exec_call = calls.find { |call| call[:pty] }
       assert exec_call.fetch(:kwargs).fetch(:tee_stdout)
-      assert_equal ['kamal', 'accessory', 'exec', '--interactive', '--reuse', 'backup', 'kamal-backup backup'],
+      assert_equal ['kamal', 'accessory', 'exec', '--interactive', '--reuse', 'backup', 'kamal-backup', 'backup'],
                    exec_call.fetch(:spec).argv
     end
   ensure
@@ -353,7 +381,8 @@ class KamalBridgeTest < Minitest::Test
 
       stub_command_capture(KamalBackup::CommandResult.new(stdout: "0.2.2\n", stderr: '', status: 0)) do |specs|
         assert_equal '0.2.2', bridge.remote_version(accessory_name: 'backup')
-        assert_equal ['bin/kamal', 'accessory', 'exec', '--reuse', 'backup', 'kamal-backup version'], specs.first.argv
+        assert_equal ['bin/kamal', 'accessory', 'exec', '--reuse', 'backup', 'kamal-backup', 'version'],
+                     specs.first.argv
       end
     end
   end
@@ -366,7 +395,7 @@ class KamalBridgeTest < Minitest::Test
 
       stub_command_capture(KamalBackup::CommandResult.new(stdout: "0.2.2\n", stderr: '', status: 0)) do |specs|
         assert_equal '0.2.2', bridge.remote_version(accessory_name: 'backup')
-        assert_equal ['bundle', 'exec', 'kamal', 'accessory', 'exec', '--reuse', 'backup', 'kamal-backup version'],
+        assert_equal ['bundle', 'exec', 'kamal', 'accessory', 'exec', '--reuse', 'backup', 'kamal-backup', 'version'],
                      specs.first.argv
       end
     end

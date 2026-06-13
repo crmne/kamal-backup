@@ -103,7 +103,7 @@ module KamalBackup
 
         result = bridge.execute_on_accessory(
           accessory_name: accessory_name,
-          command: Shellwords.join(argv),
+          command: argv,
           stream: true
         )
         print(result.stdout) unless result.streamed

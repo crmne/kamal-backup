@@ -323,7 +323,8 @@ class CLITest < Minitest::Test
 
     assert_equal [
       { accessory_name: 'backup', command: 'kamal-backup version' },
-      { accessory_name: 'backup', command: 'kamal-backup restore production latest --confirm-production-restore',
+      { accessory_name: 'backup',
+        command: ['kamal-backup', 'restore', 'production', 'latest', '--confirm-production-restore'],
         stream: true }
     ], calls
     assert_equal "remote restore\n", out
@@ -383,7 +384,7 @@ class CLITest < Minitest::Test
       assert_equal [nil], preferred_values
       assert_equal [
         { accessory_name: 'backup', command: 'kamal-backup version' },
-        { accessory_name: 'backup', command: 'kamal-backup backup', stream: true }
+        { accessory_name: 'backup', command: %w[kamal-backup backup], stream: true }
       ], calls
       assert_equal "remote backup\n", out
     end
@@ -411,7 +412,7 @@ class CLITest < Minitest::Test
 
     assert_equal [
       { accessory_name: 'backup', command: 'kamal-backup version' },
-      { accessory_name: 'backup', command: 'kamal-backup backup --force', stream: true }
+      { accessory_name: 'backup', command: ['kamal-backup', 'backup', '--force'], stream: true }
     ], calls
     assert_equal "remote backup\n", out
   end
@@ -571,11 +572,11 @@ class CLITest < Minitest::Test
 
   def test_remote_commands_without_destination_use_default_deploy_config_when_present
     commands = {
-      ['backup'] => 'kamal-backup backup',
-      ['list'] => 'kamal-backup list',
-      ['check'] => 'kamal-backup check',
-      ['prune'] => 'kamal-backup prune',
-      ['evidence'] => 'kamal-backup evidence'
+      ['backup'] => %w[kamal-backup backup],
+      ['list'] => %w[kamal-backup list],
+      ['check'] => %w[kamal-backup check],
+      ['prune'] => %w[kamal-backup prune],
+      ['evidence'] => %w[kamal-backup evidence]
     }
 
     commands.each do |argv, expected_command|

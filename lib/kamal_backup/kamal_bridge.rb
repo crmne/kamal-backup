@@ -75,15 +75,17 @@ module KamalBackup
     end
 
     def execute_on_accessory(accessory_name:, command:, stream: false)
+      command_argv = remote_command_argv(command)
+
       if stream && (target = live_accessory_target(accessory_name))
-        execute_on_accessory_live(accessory_name: accessory_name, command: command, target: target)
+        execute_on_accessory_live(accessory_name: accessory_name, command_argv: command_argv, target: target)
       else
-        capture_kamal(kamal_exec_argv(accessory_name, command), stream: stream)
+        capture_kamal(kamal_exec_argv(accessory_name, command_argv), stream: stream)
       end
     end
 
     def remote_version(accessory_name:)
-      result = execute_on_accessory(accessory_name: accessory_name, command: 'kamal-backup version')
+      result = execute_on_accessory(accessory_name: accessory_name, command: %w[kamal-backup version])
       version = parse_version_line(result.stdout)
 
       raise ConfigurationError, "could not determine remote kamal-backup version from accessory #{accessory_name}" if version.empty?
@@ -207,7 +209,7 @@ module KamalBackup
         *(['--interactive'] if interactive),
         '--reuse',
         accessory_name,
-        command
+        *kamal_remote_command_argv(command)
       ]
     end
 
@@ -262,17 +264,17 @@ module KamalBackup
       end
     end
 
-    def execute_on_accessory_live(accessory_name:, command:, target:)
+    def execute_on_accessory_live(accessory_name:, command_argv:, target:)
       @stdout.puts('Launching command from existing container...')
 
       spec = CommandSpec.new(
-        argv: ['docker', 'exec', target.fetch(:service_name), *Shellwords.split(command)],
+        argv: ['docker', 'exec', target.fetch(:service_name), *command_argv],
         host: target.fetch(:host)
       )
       context = Command.output&.command_start(spec, redactor: @redactor)
 
       result = capture_kamal(
-        kamal_exec_argv(accessory_name, command, interactive: true),
+        kamal_exec_argv(accessory_name, command_argv, interactive: true),
         stream: true,
         log: false,
         stdout: filtered_interactive_stdout,
@@ -358,6 +360,17 @@ module KamalBackup
 
     def stream_color?
       [@stdout, @stderr].any? { |io| io.respond_to?(:tty?) && io.tty? }
+    end
+
+    def remote_command_argv(command)
+      argv = command.is_a?(String) ? Shellwords.split(command) : Array(command).compact.map(&:to_s)
+      raise ArgumentError, 'remote command cannot be empty' if argv.empty?
+
+      argv
+    end
+
+    def kamal_remote_command_argv(command)
+      remote_command_argv(command).map { |arg| Shellwords.escape(arg) }
     end
 
     def parse_version_line(output)
