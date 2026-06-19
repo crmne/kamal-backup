@@ -109,6 +109,11 @@ module KamalBackup
       restic.check.stdout
     end
 
+    def unlock
+      config.validate_restic
+      restic.unlock.stdout
+    end
+
     def prune
       config.validate_backup(check_files: false)
       restic.prune

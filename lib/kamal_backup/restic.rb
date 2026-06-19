@@ -99,6 +99,11 @@ module KamalBackup
       end
     end
 
+    def unlock
+      log('clearing stale restic locks')
+      run(%w[unlock])
+    end
+
     def check
       args = %w[check]
       args.concat(['--read-data-subset', config.check_read_data_subset]) if config.check_read_data_subset

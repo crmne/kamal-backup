@@ -191,6 +191,15 @@ module KamalBackup
       end
     end
 
+    desc 'unlock', 'Clear stale restic repository locks'
+    def unlock
+      if remote_command_mode?
+        exec_remote(%w[kamal-backup unlock])
+      else
+        print(direct_app.unlock)
+      end
+    end
+
     desc 'prune', 'Apply the configured restic retention policy and prune unneeded data'
     def prune
       if remote_command_mode?

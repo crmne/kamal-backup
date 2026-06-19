@@ -262,6 +262,16 @@ class ResticTest < Minitest::Test
     end
   end
 
+  def test_unlock_runs_restic_unlock
+    config = KamalBackup::Config.new(env: base_env('APP_NAME' => 'demo'))
+    restic = FakeRestic.new(config, 'removed stale locks')
+
+    result = restic.unlock
+
+    assert_equal %w[unlock], restic.last_args
+    assert_equal 'removed stale locks', result.stdout
+  end
+
   def test_snapshots_uses_one_filter_that_requires_all_tags
     config = KamalBackup::Config.new(env: base_env('APP_NAME' => 'demo'))
     restic = FakeRestic.new(config, '[]')
@@ -608,6 +618,17 @@ class ResticTest < Minitest::Test
       ensure
         ENV['PATH'] = previous_path
       end
+    end
+  end
+
+  def test_restic_lock_errors_include_unlock_hint
+    with_fake_restic("#!/bin/sh\necho 'unable to create lock in backend: repository is already locked' >&2\nexit 11\n") do
+      error = assert_raises(KamalBackup::CommandError) do
+        plumbing_restic.snapshots
+      end
+
+      assert_equal 11, error.status
+      assert_includes error.message, 'run `kamal-backup unlock`'
     end
   end
 

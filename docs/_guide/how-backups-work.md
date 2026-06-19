@@ -67,6 +67,7 @@ For SQLite apps that store the database under the same mounted volume as Active 
 - `drill production`: Restore into a scratch database and scratch Active Storage path on production infrastructure, run an optional verification command, and record the result as JSON.
 - `list`: Show restic snapshots for this app so you can see recent runs and snapshot IDs.
 - `check`: Verify the restic repository and store the latest result in `KAMAL_BACKUP_STATE_DIR`, which defaults to `/var/lib/kamal-backup`.
+- `unlock`: Clear stale restic repository locks.
 - `prune`: Apply the configured retention policy and remove unneeded restic data.
 - `evidence`: Print a redacted JSON summary with current backup settings, latest snapshots, latest check result, latest drill result, and tool versions. This is meant to be attached to internal ops records or security reviews.
 - `validate`: Check required backup configuration without running a backup. From an app checkout with `config/deploy.yml`, it validates the backup accessory and `config/kamal-backup.yml` before the accessory has to be running.

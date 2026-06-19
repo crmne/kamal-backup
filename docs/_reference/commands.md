@@ -17,7 +17,7 @@ bundle exec kamal-backup -c config/deploy.staging.yml -d staging check
 bundle exec kamal-backup restore local latest
 ```
 
-From an app checkout with the default `config/deploy.yml`, `backup`, `list`, `check`, `evidence`, `validate`, and `version` infer the backup accessory and shell out through Kamal. Use `-d` and `-c` when you need an explicit Kamal destination or config file. Local commands run on your machine.
+From an app checkout with the default `config/deploy.yml`, `backup`, `list`, `check`, `unlock`, `evidence`, `validate`, and `version` infer the backup accessory and shell out through Kamal. Use `-d` and `-c` when you need an explicit Kamal destination or config file. Local commands run on your machine.
 
 The command surface is:
 
@@ -30,6 +30,7 @@ kamal-backup drill local [snapshot-or-latest]
 kamal-backup drill production [snapshot-or-latest]
 kamal-backup list
 kamal-backup check
+kamal-backup unlock
 kamal-backup prune
 kamal-backup evidence
 kamal-backup validate
@@ -56,6 +57,7 @@ kamal-backup drill production --help
 | `drill production [snapshot-or-latest]` | Restore into scratch targets on production infrastructure, optionally run `--check`, print JSON, and store the latest drill record. Use `--database` for PostgreSQL/MySQL or `--sqlite-path` for SQLite. Use `--files` for the scratch Active Storage target; the default is `/restore/files`. Remote execution requires matching local/remote versions. |
 | `list` | Show restic snapshots for the configured app tags. From an app checkout with `config/deploy.yml`, or with `-d`/`-c`, it runs through Kamal against the backup accessory and requires matching local/remote versions. |
 | `check` | Verify the restic repository and store the latest result under `KAMAL_BACKUP_STATE_DIR`. From an app checkout with `config/deploy.yml`, or with `-d`/`-c`, it runs through Kamal against the backup accessory and requires matching local/remote versions. |
+| `unlock` | Clear stale restic repository locks. Use this when restic reports that the repository is already locked, then retry the blocked command. From an app checkout with `config/deploy.yml`, or with `-d`/`-c`, it runs through Kamal against the backup accessory and requires matching local/remote versions. |
 | `prune` | Apply `restic.retention` with `restic forget --prune`, scoped separately for each configured database and file snapshot group. From an app checkout with `config/deploy.yml`, or with `-d`/`-c`, it runs through Kamal against the backup accessory and requires matching local/remote versions. |
 | `evidence` | Print redacted JSON for ops records or security reviews, including latest snapshots, latest check result, latest drill result, retention, and tool versions. From an app checkout with `config/deploy.yml`, or with `-d`/`-c`, it runs through Kamal against the backup accessory and requires matching local/remote versions. |
 | `validate` | Validate the backup configuration without running a backup. From an app checkout with `config/deploy.yml`, it validates the backup accessory and `config/kamal-backup.yml` before the accessory has to be running. Use `-d` or `-c` for an explicit Kamal context. |

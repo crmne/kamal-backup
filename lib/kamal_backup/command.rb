@@ -174,12 +174,13 @@ module KamalBackup
       end
 
       def command_failure(spec, status, stdout, stderr, redactor)
+        redacted_stderr = redactor.redact_string(stderr)
         CommandError.new(
-          "command failed (#{status}): #{spec.display(redactor)}\n#{redactor.redact_string(stderr)}",
+          "command failed (#{status}): #{spec.display(redactor)}\n#{redacted_stderr}#{restic_lock_hint(spec, stderr)}",
           command: spec,
           status: status,
           stdout: redactor.redact_string(stdout),
-          stderr: redactor.redact_string(stderr)
+          stderr: redacted_stderr
         )
       end
 
@@ -190,6 +191,14 @@ module KamalBackup
           status: 127,
           stderr: error.message
         )
+      end
+
+      def restic_lock_hint(spec, stderr)
+        return '' unless spec.argv.first == 'restic'
+        return '' if spec.argv[1] == 'unlock'
+        return '' unless stderr.to_s.match?(/repository is already locked|unlock.+stale locks/i)
+
+        "\nHint: run `kamal-backup unlock` to clear stale restic locks, then retry the command."
       end
     end
   end

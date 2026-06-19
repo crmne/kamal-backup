@@ -6,7 +6,7 @@ require 'json'
 class AppTest < Minitest::Test
   class FakeRestic
     attr_reader :backup_path_calls, :check_calls, :database_file_calls, :ensure_repository_calls,
-                :latest_snapshot_calls, :prune_calls, :restore_snapshot_calls
+                :latest_snapshot_calls, :prune_calls, :restore_snapshot_calls, :unlock_calls
 
     def initialize
       @backup_path_calls = []
@@ -16,6 +16,7 @@ class AppTest < Minitest::Test
       @latest_snapshot_calls = []
       @prune_calls = 0
       @restore_snapshot_calls = []
+      @unlock_calls = 0
       @database_snapshot = 'latest-database-snapshot'
       @files_snapshot = 'latest-files-snapshot'
       @snapshot_time = nil
@@ -38,6 +39,11 @@ class AppTest < Minitest::Test
     def check
       @check_calls += 1
       KamalBackup::CommandResult.new(stdout: 'checked', stderr: '', status: 0)
+    end
+
+    def unlock
+      @unlock_calls += 1
+      KamalBackup::CommandResult.new(stdout: "unlocked\n", stderr: '', status: 0)
     end
 
     attr_writer :database_snapshot, :files_snapshot, :snapshot_time
@@ -334,6 +340,26 @@ class AppTest < Minitest::Test
 
       assert_equal 1, restic.prune_calls
       assert_equal "pruned\n", result.first.stdout
+    end
+  end
+
+  def test_unlock_clears_stale_repository_locks
+    Dir.mktmpdir do |dir|
+      restic = FakeRestic.new
+      app = KamalBackup::App.new(
+        env: base_env(
+          'DATABASE_ADAPTER' => 'sqlite',
+          'SQLITE_DATABASE_PATH' => File.join(dir, 'missing.sqlite3'),
+          'BACKUP_PATHS' => File.join(dir, 'missing-storage')
+        ),
+        restic: restic,
+        database: FakeDatabase.new
+      )
+
+      result = app.unlock
+
+      assert_equal 1, restic.unlock_calls
+      assert_equal "unlocked\n", result
     end
   end
 

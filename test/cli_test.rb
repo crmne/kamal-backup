@@ -102,6 +102,7 @@ class CLITest < Minitest::Test
     assert_includes out, 'kamal-backup init'
     assert_includes out, 'kamal-backup backup'
     assert_includes out, 'kamal-backup prune'
+    assert_includes out, 'kamal-backup unlock'
     assert_includes out, 'kamal-backup validate'
     assert_includes out, 'kamal-backup restore SUBCOMMAND ...ARGS'
     assert_includes out, 'kamal-backup drill SUBCOMMAND ...ARGS'
@@ -548,6 +549,21 @@ class CLITest < Minitest::Test
     assert_equal "removed 2 snapshots\n", out
   end
 
+  def test_local_unlock_prints_restic_output
+    fake = Object.new
+    fake.define_singleton_method(:unlock) do
+      "removed stale locks\n"
+    end
+
+    out, = capture_io do
+      with_fake_app(fake) do
+        KamalBackup::CLI.start(['unlock'], env: base_env)
+      end
+    end
+
+    assert_equal "removed stale locks\n", out
+  end
+
   def test_remote_exec_streams_successful_kamal_output
     fake_bridge = Object.new
 
@@ -575,6 +591,7 @@ class CLITest < Minitest::Test
       ['backup'] => %w[kamal-backup backup],
       ['list'] => %w[kamal-backup list],
       ['check'] => %w[kamal-backup check],
+      ['unlock'] => %w[kamal-backup unlock],
       ['prune'] => %w[kamal-backup prune],
       ['evidence'] => %w[kamal-backup evidence]
     }
