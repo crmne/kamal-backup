@@ -54,7 +54,7 @@ class AppTest < Minitest::Test
 
       if tags.include?('type:database')
         { 'short_id' => @database_snapshot, 'time' => snapshot_time }
-      else
+      elsif @files_snapshot
         { 'short_id' => @files_snapshot, 'time' => snapshot_time }
       end
     end
@@ -484,6 +484,130 @@ class AppTest < Minitest::Test
       assert_equal 1, database.current_restore_calls.size
       assert_equal 'hello from production backup', File.read(File.join(files, 'hello.txt'))
       refute File.exist?(old_file)
+    end
+  end
+
+  def test_restore_to_local_machine_skips_file_restore_for_database_only_backups
+    Dir.mktmpdir do |dir|
+      db = File.join(dir, 'app_development.sqlite3')
+      files = File.join(dir, 'storage')
+      File.write(db, '')
+      FileUtils.mkdir_p(files)
+
+      restic = FakeRestic.new
+      restic.files_snapshot = nil
+      database = FakeDatabase.new(adapter_name: 'sqlite', current_target_identifier: db)
+
+      app = KamalBackup::App.new(
+        env: base_env(
+          'DATABASE_ADAPTER' => 'sqlite',
+          'SQLITE_DATABASE_PATH' => db,
+          'BACKUP_PATHS' => files
+        ),
+        restic: restic,
+        database: database
+      )
+
+      result = app.restore_to_local_machine('latest')
+
+      assert_equal 1, database.current_restore_calls.size
+      assert_equal 'latest-database-snapshot', database.current_restore_calls.first.fetch(:snapshot)
+      assert_empty restic.restore_snapshot_calls
+      assert_nil result.fetch(:files)
+      assert_equal 'restore_result', result.fetch(:kind)
+    end
+  end
+
+  def test_restore_to_production_skips_file_restore_for_database_only_backups
+    Dir.mktmpdir do |dir|
+      db = File.join(dir, 'app_production.sqlite3')
+      files = File.join(dir, 'storage')
+      File.write(db, '')
+      FileUtils.mkdir_p(files)
+
+      restic = FakeRestic.new
+      restic.files_snapshot = nil
+      database = FakeDatabase.new(adapter_name: 'sqlite', current_target_identifier: db)
+
+      app = KamalBackup::App.new(
+        env: base_env(
+          'DATABASE_ADAPTER' => 'sqlite',
+          'SQLITE_DATABASE_PATH' => db,
+          'BACKUP_PATHS' => files
+        ),
+        restic: restic,
+        database: database
+      )
+
+      result = app.restore_to_production('latest')
+
+      assert_equal 1, database.current_restore_calls.size
+      assert_empty restic.restore_snapshot_calls
+      assert_nil result.fetch(:files)
+      assert_equal 'production', result.fetch(:scope)
+    end
+  end
+
+  def test_drill_on_local_machine_skips_file_restore_for_database_only_backups
+    Dir.mktmpdir do |dir|
+      db = File.join(dir, 'app_development.sqlite3')
+      files = File.join(dir, 'storage')
+      state = File.join(dir, 'state')
+      File.write(db, '')
+      FileUtils.mkdir_p(files)
+
+      restic = FakeRestic.new
+      restic.files_snapshot = nil
+      database = FakeDatabase.new(adapter_name: 'sqlite', current_target_identifier: db)
+
+      app = KamalBackup::App.new(
+        env: base_env(
+          'DATABASE_ADAPTER' => 'sqlite',
+          'SQLITE_DATABASE_PATH' => db,
+          'BACKUP_PATHS' => files,
+          'KAMAL_BACKUP_STATE_DIR' => state
+        ),
+        restic: restic,
+        database: database
+      )
+
+      result = app.drill_on_local_machine('latest')
+
+      assert_equal 'ok', result.fetch(:status)
+      assert_equal 1, database.current_restore_calls.size
+      assert_empty restic.restore_snapshot_calls
+      assert_nil result.fetch(:files)
+    end
+  end
+
+  def test_drill_on_production_skips_file_restore_for_database_only_backups
+    Dir.mktmpdir do |dir|
+      target = File.join(dir, 'restored-files')
+      state = File.join(dir, 'state')
+      restic = FakeRestic.new
+      restic.files_snapshot = nil
+      database = FakeDatabase.new(adapter_name: 'postgres')
+
+      app = KamalBackup::App.new(
+        env: base_env(
+          'DATABASE_ADAPTER' => 'postgres',
+          'DATABASE_URL' => 'postgres://app@db/app_production',
+          'KAMAL_BACKUP_STATE_DIR' => state
+        ),
+        restic: restic,
+        database: database
+      )
+
+      result = app.drill_on_production(
+        'latest',
+        database_name: 'app_restore_20260711',
+        file_target: target
+      )
+
+      assert_equal 'ok', result.fetch(:status)
+      assert_equal 1, database.scratch_restore_calls.size
+      assert_empty restic.restore_snapshot_calls
+      assert_nil result.fetch(:files)
     end
   end
 
