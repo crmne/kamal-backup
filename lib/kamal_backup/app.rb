@@ -374,9 +374,11 @@ module KamalBackup
     end
 
     def perform_replacement_file_restore(snapshot, production_source:)
+      resolved_snapshot = resolve_snapshot(snapshot, tags: ['type:files'], required: false)
+      return nil unless resolved_snapshot
+
       source_paths = production_source ? config.backup_paths : config.local_restore_source_paths
       target_paths = config.backup_paths
-      resolved_snapshot = resolve_snapshot(snapshot, tags: ['type:files'])
       Dir.mktmpdir('kamal-backup-restore-') do |stage_dir|
         restic.restore_snapshot(resolved_snapshot, stage_dir)
         replace_target_paths(stage_dir, source_paths: source_paths, target_paths: target_paths)
@@ -411,7 +413,9 @@ module KamalBackup
     end
 
     def perform_file_restore(snapshot, target:)
-      resolved_snapshot = resolve_snapshot(snapshot, tags: ['type:files'])
+      resolved_snapshot = resolve_snapshot(snapshot, tags: ['type:files'], required: false)
+      return nil unless resolved_snapshot
+
       validated_target = config.validate_file_restore_target(target)
       restic.restore_snapshot(resolved_snapshot, validated_target)
 
@@ -471,11 +475,17 @@ module KamalBackup
                      end
     end
 
-    def resolve_snapshot(argument, tags:)
+    # Database-only configs never create a type:files snapshot, so file restores
+    # resolve with required: false and skip when nothing was backed up.
+    def resolve_snapshot(argument, tags:, required: true)
       if argument == 'latest'
         snapshot = restic.latest_snapshot(tags: tags)
 
-        raise ConfigurationError, "no restic snapshot found for #{tags.join(', ')}" unless snapshot
+        if snapshot.nil?
+          raise ConfigurationError, "no restic snapshot found for #{tags.join(', ')}" if required
+
+          return nil
+        end
 
         snapshot['short_id'] || snapshot['id']
       else
