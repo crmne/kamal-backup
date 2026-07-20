@@ -58,8 +58,8 @@ module KamalBackup
 
       build_restore_result('local', snapshot) do |result|
         databases.each { |adapter| validate_local_machine_database_target(adapter) }
-        result[:databases] = perform_database_restores_to_current(snapshot)
         result[:files] = perform_replacement_file_restore(snapshot, production_source: false)
+        result[:databases] = perform_database_restores_to_current(snapshot)
       end
     end
 
@@ -67,8 +67,8 @@ module KamalBackup
       validate_production_restore
 
       build_restore_result('production', snapshot) do |result|
-        result[:databases] = perform_database_restores_to_current(snapshot)
         result[:files] = perform_replacement_file_restore(snapshot, production_source: true)
+        result[:databases] = perform_database_restores_to_current(snapshot)
       end
     end
 

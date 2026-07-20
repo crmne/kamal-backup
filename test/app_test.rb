@@ -437,7 +437,7 @@ class AppTest < Minitest::Test
 
       result = app.restore_to_local_machine('latest')
 
-      assert_equal [['type:database', 'database:app', 'adapter:sqlite'], ['type:files']], restic.latest_snapshot_calls
+      assert_equal [['type:files'], ['type:database', 'database:app', 'adapter:sqlite']], restic.latest_snapshot_calls
       assert_equal [{ snapshot: 'latest-database-snapshot', adapter: 'sqlite', database_name: 'app' }],
                    restic.database_file_calls
       assert_equal 1, database.current_restore_calls.size
@@ -484,6 +484,72 @@ class AppTest < Minitest::Test
       assert_equal 1, database.current_restore_calls.size
       assert_equal 'hello from production backup', File.read(File.join(files, 'hello.txt'))
       refute File.exist?(old_file)
+    end
+  end
+
+  def test_restore_to_production_preserves_sqlite_database_inside_file_backup_path
+    Dir.mktmpdir do |dir|
+      files = File.join(dir, 'storage')
+      db = File.join(files, 'app_production.sqlite3')
+      FileUtils.mkdir_p(files)
+      File.write(db, 'live')
+
+      restic = FakeRestic.new
+      restic.stage_file('latest-files-snapshot', File.join(files, 'hello.txt'), 'restored file')
+      database = FakeDatabase.new(adapter_name: 'sqlite', current_target_identifier: db)
+      database.define_singleton_method(:restore_to_current) do |_restic, _snapshot, _filename|
+        FileUtils.mkdir_p(File.dirname(db))
+        File.write(db, 'restored database')
+      end
+
+      app = KamalBackup::App.new(
+        env: base_env(
+          'DATABASE_ADAPTER' => 'sqlite',
+          'SQLITE_DATABASE_PATH' => db,
+          'BACKUP_PATHS' => files
+        ),
+        restic: restic,
+        database: database
+      )
+
+      app.restore_to_production('latest')
+
+      assert_equal 'restored database', File.read(db)
+      assert_equal 'restored file', File.read(File.join(files, 'hello.txt'))
+    end
+  end
+
+  def test_restore_to_local_machine_preserves_sqlite_database_inside_file_backup_path
+    Dir.mktmpdir do |dir|
+      source_files = '/data/storage'
+      files = File.join(dir, 'storage')
+      db = File.join(files, 'app_development.sqlite3')
+      FileUtils.mkdir_p(files)
+      File.write(db, 'live')
+
+      restic = FakeRestic.new
+      restic.stage_file('latest-files-snapshot', File.join(source_files, 'hello.txt'), 'restored file')
+      database = FakeDatabase.new(adapter_name: 'sqlite', current_target_identifier: db)
+      database.define_singleton_method(:restore_to_current) do |_restic, _snapshot, _filename|
+        FileUtils.mkdir_p(File.dirname(db))
+        File.write(db, 'restored database')
+      end
+
+      app = KamalBackup::App.new(
+        env: base_env(
+          'DATABASE_ADAPTER' => 'sqlite',
+          'SQLITE_DATABASE_PATH' => db,
+          'BACKUP_PATHS' => files,
+          'LOCAL_RESTORE_SOURCE_PATHS' => source_files
+        ),
+        restic: restic,
+        database: database
+      )
+
+      app.restore_to_local_machine('latest')
+
+      assert_equal 'restored database', File.read(db)
+      assert_equal 'restored file', File.read(File.join(files, 'hello.txt'))
     end
   end
 
