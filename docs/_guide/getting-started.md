@@ -85,14 +85,16 @@ accessories:
         - AWS_ACCESS_KEY_ID
         - AWS_SECRET_ACCESS_KEY
     volumes:
-      - "chatwithwork_storage:/data/storage:ro"
+      - "chatwithwork_storage:/data/storage"
       - "chatwithwork_backup_state:/var/lib/kamal-backup"
 ```
 {: data-title="config/deploy.yml"}
 
 Kamal uploads `config/kamal-backup.yml` and mounts it read-only into the accessory. Secrets still stay in Kamal secrets.
 
-If your SQLite database lives on the mounted storage volume, omit `:ro` from that volume so SQLite can back up the live WAL database normally.
+The storage volume is writable so `restore production` can replace its contents without replacing the mount point.
+Writable access is also required when a live SQLite database is stored on that volume. For a backup-only accessory,
+you can append `:ro`; remove it and reboot the accessory before a production file restore.
 
 ## 4. Boot the accessory
 

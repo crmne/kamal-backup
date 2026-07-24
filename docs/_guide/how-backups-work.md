@@ -40,7 +40,8 @@ When a backup run starts, `kamal-backup` does five things:
 1. It validates the app name, restic repository, database settings, and file paths.
 2. It creates database backups using the database-native export tool:
    PostgreSQL uses `pg_dump`, MySQL/MariaDB use `mariadb-dump` or `mysqldump`, and SQLite uses `sqlite3 .backup`.
-3. It streams each database backup into restic and tags it with `type:database`, `database:<name>`, and `adapter:<adapter>`.
+3. It has restic run and capture each database export, then tags the snapshot with `type:database`,
+   `database:<name>`, and `adapter:<adapter>`. If the export command fails, restic does not create a snapshot.
 4. It runs one `restic backup` for the configured paths and tags that snapshot with `type:files`. Path-level excludes and automatic SQLite database/WAL/SHM excludes apply only to this file snapshot.
 5. It optionally prunes old snapshots and runs the same repository verification as `kamal-backup check`, depending on configuration.
 

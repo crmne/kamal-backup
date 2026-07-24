@@ -23,13 +23,14 @@ class ResticTest < Minitest::Test
     def log(_message); end
   end
 
-  class CapturingPipeRestic < KamalBackup::Restic
-    attr_reader :consumer_argv
+  class CapturingBackupRestic < KamalBackup::Restic
+    attr_reader :backup_args, :backup_env
 
     private
 
-    def pipe_commands(_producer, consumer, **)
-      @consumer_argv = consumer.argv
+    def run(args, env:, **)
+      @backup_args = args
+      @backup_env = env
       KamalBackup::CommandResult.new(stdout: '', stderr: '', status: 0)
     end
 
@@ -125,12 +126,20 @@ class ResticTest < Minitest::Test
       'SQLITE_DATABASE_PATH' => '/data/storage/production.sqlite3',
       'BACKUP_PATHS' => '/data/storage'
     ))
-    restic = CapturingPipeRestic.new(config, redactor: KamalBackup::Redactor.new(env: {}))
-    dump_command = KamalBackup::CommandSpec.new(argv: ['sqlite3', '/data/storage/production.sqlite3', '.dump'], env: {})
+    restic = CapturingBackupRestic.new(config, redactor: KamalBackup::Redactor.new(env: {}))
+    dump_command = KamalBackup::CommandSpec.new(
+      argv: ['sqlite3', '/data/storage/production.sqlite3', '.dump'],
+      env: { 'DATABASE_SECRET' => 'secret' }
+    )
 
     restic.backup_stream(dump_command, filename: 'databases/demo/app/sqlite.sqlite3', tags: ['type:database'])
 
-    refute_includes restic.consumer_argv, '--exclude'
+    refute_includes restic.backup_args, '--exclude'
+    assert_includes restic.backup_args, '--stdin-from-command'
+    delimiter = restic.backup_args.index('--')
+    assert_equal dump_command.argv, restic.backup_args.drop(delimiter + 1)
+    assert_equal 'secret', restic.backup_env.fetch('DATABASE_SECRET')
+    assert_equal 'restic-secret', restic.backup_env.fetch('RESTIC_PASSWORD')
   end
 
   def test_backup_file_reports_restic_stderr_when_stdin_pipe_closes

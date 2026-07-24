@@ -24,7 +24,7 @@ module KamalBackup
           @backup_block.call
           log("backup completed at #{Time.now.utc.iso8601}")
         rescue StandardError => e
-          warn("[kamal-backup] backup failed at #{Time.now.utc.iso8601}: #{e.class}: #{e.message}")
+          warn("ERROR [kamal-backup] backup failed at #{Time.now.utc.iso8601}: #{e.class}: #{e.message}")
         end
 
         sleep_interruptibly(@config.backup_schedule_seconds)
@@ -49,7 +49,7 @@ module KamalBackup
     end
 
     def log(message)
-      $stdout.puts("[kamal-backup] #{message}")
+      $stdout.puts("INFO [kamal-backup] #{message}")
     end
   end
 end

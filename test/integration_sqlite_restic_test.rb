@@ -78,4 +78,37 @@ class IntegrationSqliteResticTest < Minitest::Test
       assert_equal 'hello from files', File.read(File.join(files, 'hello.txt'))
     end
   end
+
+  def test_failed_database_dump_does_not_create_a_restic_snapshot
+    skip 'set KAMAL_BACKUP_RUN_INTEGRATION=1 to run restic integration tests' unless ENV['KAMAL_BACKUP_RUN_INTEGRATION'] == '1'
+    skip 'restic is required' unless system('which', 'restic', out: File::NULL)
+
+    Dir.mktmpdir do |dir|
+      config = KamalBackup::Config.new(
+        env: base_env(
+          'APP_NAME' => 'integration',
+          'BACKUP_PATHS' => '',
+          'RESTIC_REPOSITORY' => File.join(dir, 'repo'),
+          'RESTIC_PASSWORD' => 'integration-secret',
+          'RESTIC_INIT_IF_MISSING' => 'true'
+        )
+      )
+      restic = KamalBackup::Restic.new(config, redactor: KamalBackup::Redactor.new(env: config.env))
+      restic.ensure_repository
+      dump_command = KamalBackup::CommandSpec.new(
+        argv: ['sh', '-c', 'printf partial-data; echo dump-failed >&2; exit 3']
+      )
+
+      error = assert_raises(KamalBackup::CommandError) do
+        restic.backup_stream(
+          dump_command,
+          filename: 'databases/integration/app/mysql.sql',
+          tags: ['type:database', 'database:app', 'adapter:mysql']
+        )
+      end
+
+      assert_includes error.message, 'dump-failed'
+      assert_nil restic.latest_snapshot(tags: ['type:database', 'database:app', 'adapter:mysql'])
+    end
+  end
 end

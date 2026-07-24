@@ -93,6 +93,10 @@ This path uses:
 - the accessory's current paths
 - the same restic repository the scheduled backups use
 
+The storage volume must be mounted read-write for a production file restore. The restore replaces the contents of
+an existing mounted directory while preserving the mount point itself, then restores databases. Restoring files
+first prevents a failed or read-only file restore from leaving the database at a different point in time.
+
 This is intentionally not a quiet operation. `restore production` is for real incident recovery.
 
 `restore production` does not accept `--yes` as a confirmation shortcut. Interactive use asks you to type the app name and `RESTORE PRODUCTION`. Automation must pass the explicit `--confirm-production-restore` flag.
