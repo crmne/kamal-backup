@@ -489,6 +489,70 @@ class AppTest < Minitest::Test
     end
   end
 
+  def test_restore_to_production_replaces_a_configured_file
+    Dir.mktmpdir do |dir|
+      db = File.join(dir, 'app_production.sqlite3')
+      file = File.join(dir, 'manifest.json')
+      File.write(db, '')
+      File.write(file, 'stale')
+
+      restic = FakeRestic.new
+      restic.stage_file('latest-files-snapshot', file, 'restored')
+      database = FakeDatabase.new(adapter_name: 'sqlite', current_target_identifier: db)
+      app = KamalBackup::App.new(
+        env: base_env(
+          'DATABASE_ADAPTER' => 'sqlite',
+          'SQLITE_DATABASE_PATH' => db,
+          'BACKUP_PATHS' => file
+        ),
+        restic: restic,
+        database: database
+      )
+
+      app.restore_to_production('latest')
+
+      assert_equal 'restored', File.read(file)
+      assert_equal 1, database.current_restore_calls.size
+    end
+  end
+
+  def test_file_restore_reports_an_unwritable_file_target
+    Dir.mktmpdir do |dir|
+      target = File.join(dir, 'manifest.json')
+      source_path = '/data/manifest.json'
+      stage_dir = File.join(dir, 'stage')
+      source = File.join(stage_dir, source_path.sub(%r{\A/+}, ''))
+      FileUtils.mkdir_p(File.dirname(source))
+      File.write(source, 'restored')
+      File.write(target, 'stale')
+      app = KamalBackup::App.new(env: base_env)
+
+      error = FileUtils.stub(:remove_entry, ->(*) { raise Errno::EROFS, target }) do
+        assert_raises(KamalBackup::ConfigurationError) do
+          app.send(:replace_target_path, stage_dir, source_path, target)
+        end
+      end
+
+      assert_includes error.message, 'target must be writable'
+    end
+  end
+
+  def test_file_restore_preflight_reports_an_unwritable_directory_target
+    Dir.mktmpdir do |dir|
+      target = File.join(dir, 'storage')
+      FileUtils.mkdir_p(target)
+      app = KamalBackup::App.new(env: base_env)
+
+      error = Dir.stub(:mktmpdir, ->(*) { raise Errno::EROFS, target }) do
+        assert_raises(KamalBackup::ConfigurationError) do
+          app.send(:ensure_writable_restore_target, target)
+        end
+      end
+
+      assert_includes error.message, 'target must be writable'
+    end
+  end
+
   def test_restore_to_production_preserves_sqlite_database_inside_file_backup_path
     Dir.mktmpdir do |dir|
       files = File.join(dir, 'storage')
