@@ -124,12 +124,14 @@ accessories:
         - AWS_ACCESS_KEY_ID
         - AWS_SECRET_ACCESS_KEY
     volumes:
-      - "chatwithwork_storage:/data/storage:ro"
+      - "chatwithwork_storage:/data/storage"
       - "chatwithwork_backup_state:/var/lib/kamal-backup"
 ```
 {: data-title="config/deploy.yml"}
 
 The `files:` line is what keeps non-secret backup settings out of environment variables. Kamal uploads `config/kamal-backup.yml` and mounts it read-only into the accessory.
+The storage volume is writable so production file restores and live SQLite WAL backups can work. For a backup-only
+accessory, append `:ro`; remove it and reboot the accessory before running `restore production`.
 
 ## Secrets
 

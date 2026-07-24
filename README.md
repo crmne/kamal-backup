@@ -68,11 +68,13 @@ accessories:
         - AWS_ACCESS_KEY_ID
         - AWS_SECRET_ACCESS_KEY
     volumes:
-      - "chatwithwork_storage:/data/storage:ro"
+      - "chatwithwork_storage:/data/storage"
       - "chatwithwork_backup_state:/var/lib/kamal-backup"
 ```
 
-For SQLite databases stored on the mounted storage volume, omit `:ro` from that volume.
+The storage volume is writable so `restore production` can replace its contents safely without replacing the mount
+point. Writable access is also required for SQLite databases stored on that volume. For a backup-only accessory,
+you can append `:ro`; remove it and reboot the accessory before a production file restore.
 When the configured SQLite database file lives under a configured file backup path, `kamal-backup` excludes the raw database, WAL, and shared-memory files from the restic file snapshot automatically.
 
 Put the backup settings in `config/kamal-backup.yml`:

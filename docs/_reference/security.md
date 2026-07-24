@@ -33,7 +33,9 @@ This is why the docs talk about database backups rather than raw database direct
 
 ## Active Storage backups
 
-File-backed Active Storage files are backed up from configured mounted paths with `restic backup`. In a Kamal accessory, mount the production storage volume read-only when possible so the backup container can read Active Storage files without being able to modify them.
+File-backed Active Storage files are backed up from configured mounted paths with `restic backup`. A backup-only
+accessory can mount the production storage volume read-only so the container cannot modify it. `restore production`
+requires that mount to be writable; remove `:ro` and reboot the accessory before restoring files.
 
 SQLite is the exception when the live database is on that storage volume. Rails SQLite apps commonly use WAL mode, and live WAL backups need normal read-write access to the database, WAL, and shared-memory files. For the normal SQLite setup, mount the storage volume read-write and point the SQLite database `path` at the live database. If the backup accessory must have no write access to app storage, back up a writer-created WAL-less snapshot instead.
 

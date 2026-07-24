@@ -32,9 +32,9 @@ class SchedulerTest < Minitest::Test
     out, _err = with_restored_traps { capture_io { Timeout.timeout(10) { scheduler.run } } }
 
     assert_equal 2, calls
-    assert_includes out, 'backup started at'
-    assert_includes out, 'backup completed at'
-    assert_includes out, 'scheduler stopped at'
+    assert_includes out, 'INFO [kamal-backup] backup started at'
+    assert_includes out, 'INFO [kamal-backup] backup completed at'
+    assert_includes out, 'INFO [kamal-backup] scheduler stopped at'
   end
 
   def test_run_warns_and_keeps_running_when_backup_raises
@@ -49,7 +49,7 @@ class SchedulerTest < Minitest::Test
     out, err = with_restored_traps { capture_io { Timeout.timeout(10) { scheduler.run } } }
 
     assert_equal 2, calls
-    assert_includes err, 'backup failed at'
+    assert_includes err, 'ERROR [kamal-backup] backup failed at'
     assert_includes err, 'RuntimeError: boom'
     assert_includes out, 'backup completed at'
   end

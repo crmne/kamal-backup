@@ -77,8 +77,8 @@ module KamalBackup
 
       run_drill('local', snapshot, check_command: check_command) do |result|
         databases.each { |adapter| validate_local_machine_database_target(adapter) }
-        result[:databases] = perform_database_restores_to_current(snapshot)
         result[:files] = perform_replacement_file_restore(snapshot, production_source: false)
+        result[:databases] = perform_database_restores_to_current(snapshot)
       end
     end
 
@@ -87,6 +87,7 @@ module KamalBackup
       validate_production_drill(file_target, database_name, sqlite_path)
 
       run_drill('production', snapshot, check_command: check_command) do |result|
+        result[:files] = perform_file_restore(snapshot, target: file_target)
         result[:databases] = databases.map do |adapter|
           perform_database_restore_to_scratch(
             snapshot,
@@ -95,7 +96,6 @@ module KamalBackup
             sqlite_path: sqlite_path
           )
         end
-        result[:files] = perform_file_restore(snapshot, target: file_target)
       end
     end
 
@@ -374,11 +374,11 @@ module KamalBackup
     end
 
     def perform_replacement_file_restore(snapshot, production_source:)
-      resolved_snapshot = resolve_snapshot(snapshot, tags: ['type:files'], required: false)
-      return nil unless resolved_snapshot
+      return nil if config.backup_paths.empty?
 
       source_paths = production_source ? config.backup_paths : config.local_restore_source_paths
       target_paths = config.backup_paths
+      resolved_snapshot = resolve_snapshot(snapshot, tags: ['type:files'])
       Dir.mktmpdir('kamal-backup-restore-') do |stage_dir|
         restic.restore_snapshot(resolved_snapshot, stage_dir)
         replace_target_paths(stage_dir, source_paths: source_paths, target_paths: target_paths)
@@ -392,8 +392,20 @@ module KamalBackup
     end
 
     def replace_target_paths(stage_dir, source_paths:, target_paths:)
-      source_paths.zip(target_paths).each do |source_path, target_path|
+      path_pairs = source_paths.zip(target_paths)
+      validate_replacement_paths(stage_dir, path_pairs)
+
+      path_pairs.each do |source_path, target_path|
         replace_target_path(stage_dir, source_path, target_path)
+      end
+    end
+
+    def validate_replacement_paths(stage_dir, path_pairs)
+      path_pairs.each do |source_path, target_path|
+        source = staged_backup_path(stage_dir, source_path)
+        raise ConfigurationError, "restored file snapshot is missing #{source_path}" unless File.exist?(source)
+
+        ensure_writable_restore_target(target_path)
       end
     end
 
@@ -403,9 +415,29 @@ module KamalBackup
 
       raise ConfigurationError, "restored file snapshot is missing #{source_path}" unless File.exist?(source)
 
-      FileUtils.rm_rf(target)
-      FileUtils.mkdir_p(File.dirname(target))
-      FileUtils.mv(source, target)
+      if File.directory?(source) && File.directory?(target) && !File.symlink?(target)
+        replace_directory_contents(source, target)
+      else
+        FileUtils.remove_entry(target) if File.exist?(target) || File.symlink?(target)
+        FileUtils.mkdir_p(File.dirname(target))
+        FileUtils.mv(source, target)
+      end
+    rescue Errno::EACCES, Errno::EPERM, Errno::EROFS => e
+      raise ConfigurationError, "cannot restore files to #{target}: target must be writable (#{e.message})"
+    end
+
+    def ensure_writable_restore_target(target_path)
+      target = File.expand_path(target_path)
+      return unless File.directory?(target) && !File.symlink?(target)
+
+      Dir.mktmpdir('.kamal-backup-write-test-', target) {}
+    rescue Errno::EACCES, Errno::EPERM, Errno::EROFS => e
+      raise ConfigurationError, "cannot restore files to #{target}: target must be writable (#{e.message})"
+    end
+
+    def replace_directory_contents(source, target)
+      Dir.children(target).each { |entry| FileUtils.remove_entry(File.join(target, entry)) }
+      Dir.children(source).each { |entry| FileUtils.mv(File.join(source, entry), target) }
     end
 
     def staged_backup_path(stage_dir, path)
@@ -413,9 +445,9 @@ module KamalBackup
     end
 
     def perform_file_restore(snapshot, target:)
-      resolved_snapshot = resolve_snapshot(snapshot, tags: ['type:files'], required: false)
-      return nil unless resolved_snapshot
+      return nil if config.backup_paths.empty?
 
+      resolved_snapshot = resolve_snapshot(snapshot, tags: ['type:files'])
       validated_target = config.validate_file_restore_target(target)
       restic.restore_snapshot(resolved_snapshot, validated_target)
 
@@ -440,7 +472,7 @@ module KamalBackup
     def validate_production_drill(file_target, database_name, sqlite_path)
       config.validate_restic
       config.validate_database_backup
-      config.validate_file_restore_target(file_target)
+      config.validate_file_restore_target(file_target) if config.backup_paths.any?
 
       databases.each do |adapter|
         case adapter.adapter_name
@@ -475,17 +507,11 @@ module KamalBackup
                      end
     end
 
-    # Database-only configs never create a type:files snapshot, so file restores
-    # resolve with required: false and skip when nothing was backed up.
-    def resolve_snapshot(argument, tags:, required: true)
+    def resolve_snapshot(argument, tags:)
       if argument == 'latest'
         snapshot = restic.latest_snapshot(tags: tags)
 
-        if snapshot.nil?
-          raise ConfigurationError, "no restic snapshot found for #{tags.join(', ')}" if required
-
-          return nil
-        end
+        raise ConfigurationError, "no restic snapshot found for #{tags.join(', ')}" unless snapshot
 
         snapshot['short_id'] || snapshot['id']
       else

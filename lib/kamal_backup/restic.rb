@@ -28,13 +28,12 @@ module KamalBackup
     end
 
     def backup_stream(command, filename:, tags:)
-      restic_command = CommandSpec.new(
-        argv: %w[restic
-                 backup] + host_args + ['--stdin', '--stdin-filename', filename] + tag_args(common_tags + tags),
-        env: restic_env
-      )
       log("backing up stream as #{filename}")
-      pipe_commands(command, restic_command, producer_label: 'dump', consumer_label: 'restic backup')
+      run(
+        ['backup'] + host_args + ['--stdin-filename', filename] + tag_args(common_tags + tags) +
+          ['--stdin-from-command', '--'] + command.argv,
+        env: restic_env.merge(command.env)
+      )
     end
 
     def backup_file(path, filename:, tags:)
@@ -211,9 +210,9 @@ module KamalBackup
 
     private
 
-    def run(args, log_output: true)
+    def run(args, log_output: true, env: restic_env)
       Command.capture(
-        CommandSpec.new(argv: ['restic'] + args, env: restic_env),
+        CommandSpec.new(argv: ['restic'] + args, env: env),
         redactor: redactor,
         log_output: log_output
       )

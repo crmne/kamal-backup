@@ -461,6 +461,7 @@ class AppTest < Minitest::Test
       File.write(db, '')
       FileUtils.mkdir_p(files)
       File.write(old_file, 'stale')
+      target_identity = [File.stat(files).dev, File.stat(files).ino]
 
       restic = FakeRestic.new
       restic.stage_file('latest-files-snapshot', File.join(files, 'hello.txt'), 'hello from production backup')
@@ -484,6 +485,7 @@ class AppTest < Minitest::Test
       assert_equal 1, database.current_restore_calls.size
       assert_equal 'hello from production backup', File.read(File.join(files, 'hello.txt'))
       refute File.exist?(old_file)
+      assert_equal target_identity, [File.stat(files).dev, File.stat(files).ino]
     end
   end
 
@@ -553,12 +555,49 @@ class AppTest < Minitest::Test
     end
   end
 
+  def test_drill_on_local_machine_preserves_sqlite_database_inside_file_backup_path
+    Dir.mktmpdir do |dir|
+      source_files = '/data/storage'
+      files = File.join(dir, 'storage')
+      db = File.join(files, 'app_development.sqlite3')
+      state = File.join(dir, 'state')
+      FileUtils.mkdir_p(files)
+      File.write(db, 'live')
+
+      restic = FakeRestic.new
+      restic.stage_file('latest-files-snapshot', File.join(source_files, 'hello.txt'), 'restored file')
+      database = FakeDatabase.new(adapter_name: 'sqlite', current_target_identifier: db)
+      database.define_singleton_method(:restore_to_current) do |_restic, _snapshot, _filename|
+        FileUtils.mkdir_p(File.dirname(db))
+        File.write(db, 'restored database')
+      end
+
+      app = KamalBackup::App.new(
+        env: base_env(
+          'DATABASE_ADAPTER' => 'sqlite',
+          'SQLITE_DATABASE_PATH' => db,
+          'BACKUP_PATHS' => files,
+          'LOCAL_RESTORE_SOURCE_PATHS' => source_files,
+          'KAMAL_BACKUP_STATE_DIR' => state
+        ),
+        restic: restic,
+        database: database
+      )
+
+      result = app.drill_on_local_machine('latest')
+
+      assert_equal 'ok', result.fetch(:status)
+      assert_equal 'restored database', File.read(db)
+      assert_equal 'restored file', File.read(File.join(files, 'hello.txt'))
+      assert_equal [['type:files'], ['type:database', 'database:app', 'adapter:sqlite']],
+                   restic.latest_snapshot_calls
+    end
+  end
+
   def test_restore_to_local_machine_skips_file_restore_for_database_only_backups
     Dir.mktmpdir do |dir|
       db = File.join(dir, 'app_development.sqlite3')
-      files = File.join(dir, 'storage')
       File.write(db, '')
-      FileUtils.mkdir_p(files)
 
       restic = FakeRestic.new
       restic.files_snapshot = nil
@@ -568,7 +607,7 @@ class AppTest < Minitest::Test
         env: base_env(
           'DATABASE_ADAPTER' => 'sqlite',
           'SQLITE_DATABASE_PATH' => db,
-          'BACKUP_PATHS' => files
+          'BACKUP_PATHS' => ''
         ),
         restic: restic,
         database: database
@@ -581,15 +620,14 @@ class AppTest < Minitest::Test
       assert_empty restic.restore_snapshot_calls
       assert_nil result.fetch(:files)
       assert_equal 'restore_result', result.fetch(:kind)
+      assert_equal [['type:database', 'database:app', 'adapter:sqlite']], restic.latest_snapshot_calls
     end
   end
 
   def test_restore_to_production_skips_file_restore_for_database_only_backups
     Dir.mktmpdir do |dir|
       db = File.join(dir, 'app_production.sqlite3')
-      files = File.join(dir, 'storage')
       File.write(db, '')
-      FileUtils.mkdir_p(files)
 
       restic = FakeRestic.new
       restic.files_snapshot = nil
@@ -599,7 +637,7 @@ class AppTest < Minitest::Test
         env: base_env(
           'DATABASE_ADAPTER' => 'sqlite',
           'SQLITE_DATABASE_PATH' => db,
-          'BACKUP_PATHS' => files
+          'BACKUP_PATHS' => ''
         ),
         restic: restic,
         database: database
@@ -611,16 +649,15 @@ class AppTest < Minitest::Test
       assert_empty restic.restore_snapshot_calls
       assert_nil result.fetch(:files)
       assert_equal 'production', result.fetch(:scope)
+      assert_equal [['type:database', 'database:app', 'adapter:sqlite']], restic.latest_snapshot_calls
     end
   end
 
   def test_drill_on_local_machine_skips_file_restore_for_database_only_backups
     Dir.mktmpdir do |dir|
       db = File.join(dir, 'app_development.sqlite3')
-      files = File.join(dir, 'storage')
       state = File.join(dir, 'state')
       File.write(db, '')
-      FileUtils.mkdir_p(files)
 
       restic = FakeRestic.new
       restic.files_snapshot = nil
@@ -630,7 +667,7 @@ class AppTest < Minitest::Test
         env: base_env(
           'DATABASE_ADAPTER' => 'sqlite',
           'SQLITE_DATABASE_PATH' => db,
-          'BACKUP_PATHS' => files,
+          'BACKUP_PATHS' => '',
           'KAMAL_BACKUP_STATE_DIR' => state
         ),
         restic: restic,
@@ -643,6 +680,7 @@ class AppTest < Minitest::Test
       assert_equal 1, database.current_restore_calls.size
       assert_empty restic.restore_snapshot_calls
       assert_nil result.fetch(:files)
+      assert_equal [['type:database', 'database:app', 'adapter:sqlite']], restic.latest_snapshot_calls
     end
   end
 
@@ -658,6 +696,7 @@ class AppTest < Minitest::Test
         env: base_env(
           'DATABASE_ADAPTER' => 'postgres',
           'DATABASE_URL' => 'postgres://app@db/app_production',
+          'BACKUP_PATHS' => '',
           'KAMAL_BACKUP_STATE_DIR' => state
         ),
         restic: restic,
@@ -674,6 +713,36 @@ class AppTest < Minitest::Test
       assert_equal 1, database.scratch_restore_calls.size
       assert_empty restic.restore_snapshot_calls
       assert_nil result.fetch(:files)
+      assert_equal [['type:database', 'database:app', 'adapter:postgres']], restic.latest_snapshot_calls
+    end
+  end
+
+  def test_restore_to_production_rejects_a_missing_file_snapshot_before_restoring_the_database
+    Dir.mktmpdir do |dir|
+      db = File.join(dir, 'app_production.sqlite3')
+      files = File.join(dir, 'storage')
+      File.write(db, '')
+      FileUtils.mkdir_p(files)
+
+      restic = FakeRestic.new
+      restic.files_snapshot = nil
+      database = FakeDatabase.new(adapter_name: 'sqlite', current_target_identifier: db)
+      app = KamalBackup::App.new(
+        env: base_env(
+          'DATABASE_ADAPTER' => 'sqlite',
+          'SQLITE_DATABASE_PATH' => db,
+          'BACKUP_PATHS' => files
+        ),
+        restic: restic,
+        database: database
+      )
+
+      error = assert_raises(KamalBackup::ConfigurationError) do
+        app.restore_to_production('latest')
+      end
+
+      assert_includes error.message, 'no restic snapshot found for type:files'
+      assert_empty database.current_restore_calls
     end
   end
 

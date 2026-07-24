@@ -289,7 +289,7 @@ module KamalBackup
                   - AWS_ACCESS_KEY_ID
                   - AWS_SECRET_ACCESS_KEY
               volumes:
-                - "your_app_storage:/data/storage:ro"
+                - "your_app_storage:/data/storage"
                 - "your_app_backup_state:/var/lib/kamal-backup"
         YAML
       end
