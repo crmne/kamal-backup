@@ -42,12 +42,12 @@ backup:
 ```
 {: data-title="config/kamal-backup.yml"}
 
-`kamal deploy` does **not** boot accessories. Boot them explicitly first, or the app starts against a
-database container that does not exist and fails its health check with a name resolution error:
+Use `kamal setup`, not `kamal deploy`. Setup installs Docker if needed and boots the accessories as part
+of the deploy; `deploy` assumes they already exist. On a new host `deploy` starts the app against a
+database container that was never created, and it fails its health check with a name resolution error:
 
 ```sh
-bin/kamal accessory boot all -d beta
-bin/kamal deploy -d beta
+bin/kamal setup -d beta
 ```
 
 It does not matter that the deploy runs `db:prepare` and creates an empty schema before you restore.
