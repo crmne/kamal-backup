@@ -1,4 +1,5 @@
-# Only needed when local restore targets do not match Rails defaults.
+# Required for local file restores when production paths are configured.
+# Paths are local targets in the same order as production paths.
 databases:
   - name: app
     adapter: postgres

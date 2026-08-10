@@ -99,6 +99,8 @@ backup:
   schedule: 1d
 ```
 
+Only paths explicitly listed under `paths` are included in file snapshots. Omit `paths` for a database-only backup; `kamal-backup` never infers `storage` from Rails.
+
 Boot it. The container runs `kamal-backup schedule` by default:
 
 ```sh

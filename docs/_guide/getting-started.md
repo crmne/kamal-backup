@@ -55,7 +55,7 @@ backup:
 ```
 {: data-title="config/kamal-backup.yml"}
 
-For most Rails apps, `restore local` and `drill local` can infer the local development database, the local `storage` path for Active Storage, and `tmp/kamal-backup` without a second file. Only create `config/kamal-backup.local.yml` when your local targets are nonstandard.
+File backups are opt-in: only paths explicitly listed under `paths` are included. `kamal-backup` never infers `storage` from Rails. For local restores, Rails can still provide the development database and `tmp/kamal-backup`; when production file paths are configured, list their local targets in `config/kamal-backup.local.yml`.
 
 ## 2. Choose where backups live
 

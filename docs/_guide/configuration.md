@@ -39,6 +39,8 @@ backup:
 
 Edit that file for production. It is the main backup configuration: app name, database sources, restic repository, file paths, and schedule.
 
+File backups are opt-in. `kamal-backup` snapshots files only when `paths` is explicitly configured; it never infers `storage` or another file path from Rails. Omit `paths` (or set `paths: []`) for a database-only backup.
+
 `kamal-backup.yml` uses the grouped shape shown above. Older flat YAML keys such as `database_adapter`, `backup_paths`, and `restic_repository` are rejected so configuration stays explicit. See [Upgrading](/upgrading/) when moving from 0.2.
 
 ## Default options
@@ -46,7 +48,7 @@ Edit that file for production. It is the main backup configuration: app name, da
 - `accessory`: the Kamal accessory name. The default is `backup`.
 - `app`: the app tag used on restic snapshots.
 - `databases`: one or more PostgreSQL, MySQL/MariaDB, or SQLite databases to back up.
-- `paths`: filesystem paths to snapshot from mounted volumes. Entries can be strings or mappings with `path` and `exclude`.
+- `paths`: optional filesystem paths to snapshot from mounted volumes. Entries can be strings or mappings with `path` and `exclude`. No files are backed up when this is omitted or empty.
 - `restic.repository`: the restic repository location, such as S3-compatible storage, a restic REST server, or a filesystem path.
 - `restic.password.secret`: the Kamal secret env var that contains the restic password.
 - `restic.rest.username` and `restic.rest.password`: optional restic REST server credentials. These become `RESTIC_REST_USERNAME` and `RESTIC_REST_PASSWORD`.
@@ -191,18 +193,17 @@ Run this before booting or rebooting the accessory:
 bundle exec kamal-backup validate
 ```
 
-With a normal `config/deploy.yml`, `validate` checks the backup accessory config before the accessory has to be running. It catches missing app, database, restic, backup path settings, and required Kamal secrets that resolve to empty values.
+With a normal `config/deploy.yml`, `validate` checks the backup accessory config before the accessory has to be running. It catches missing app, database, and restic settings, invalid configured backup paths, and required Kamal secrets that resolve to empty values.
 
 ## Local restores
 
-For normal Rails apps, no local backup config is needed. `restore local` and `drill local` infer:
+`restore local` and `drill local` infer:
 
 - production source settings from `config/kamal-backup.yml`
 - local database settings from `config/database.yml`
-- local Active Storage path from `storage`
 - local state under `tmp/kamal-backup`
 
-Only add `config/kamal-backup.local.yml` when your local targets are nonstandard:
+File paths are never inferred. If production `paths` are configured, add `config/kamal-backup.local.yml` with the local targets in the same order. Database-only backups do not need local file paths.
 
 ```yaml
 databases:

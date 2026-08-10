@@ -42,10 +42,10 @@ When a backup run starts, `kamal-backup` does five things:
    PostgreSQL uses `pg_dump`, MySQL/MariaDB use `mariadb-dump` or `mysqldump`, and SQLite uses `sqlite3 .backup`.
 3. It has restic run and capture each database export, then tags the snapshot with `type:database`,
    `database:<name>`, and `adapter:<adapter>`. If the export command fails, restic does not create a snapshot.
-4. It runs one `restic backup` for the configured paths and tags that snapshot with `type:files`. Path-level excludes and automatic SQLite database/WAL/SHM excludes apply only to this file snapshot.
+4. When `paths` is explicitly configured, it runs one `restic backup` for those paths and tags that snapshot with `type:files`. Path-level excludes and automatic SQLite database/WAL/SHM excludes apply only to this file snapshot.
 5. It optionally prunes old snapshots and runs the same repository verification as `kamal-backup check`, depending on configuration.
 
-The result is one database snapshot per database and one file snapshot per run.
+The result is one database snapshot per database and, when paths are configured, one file snapshot per run. No file path is inferred from Rails.
 
 ## What gets backed up
 
@@ -61,8 +61,8 @@ For SQLite apps that store the database under the same mounted volume as Active 
 ## What the commands mean
 
 - `schedule`: Run the foreground scheduler loop. This is the default accessory command.
-- `backup`: Create one new database snapshot and one new Active Storage file snapshot immediately.
-- `restore local`: Pull the latest backup from restic onto your machine and restore it into your local development database and local Active Storage path.
+- `backup`: Create one new snapshot per configured database and, when paths are configured, one file snapshot immediately.
+- `restore local`: Pull the latest backup from restic onto your machine and restore it into your local development database and explicitly configured local file paths.
 - `restore production`: Restore a backup back into the production database and production Active Storage path.
 - `drill local`: Run a local restore plus an optional verification command, then record the result as JSON.
 - `drill production`: Restore into a scratch database and scratch Active Storage path on production infrastructure, run an optional verification command, and record the result as JSON.

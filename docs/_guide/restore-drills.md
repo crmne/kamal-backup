@@ -32,15 +32,16 @@ With `-d` or `-c`, `drill local` uses `config/kamal-backup.yml` for the source s
 - `restic.repository`
 - source paths from production `paths`
 
-And for a normal Rails app it infers the local target side from Rails:
+For a normal Rails app it infers part of the local target side from Rails:
 
 - the development database in `config/database.yml`
-- `storage` as the local Active Storage target
 - `tmp/kamal-backup` as the local drill state directory
+
+File paths are never inferred. When production paths are configured, list the corresponding local targets in `config/kamal-backup.local.yml`. Database-only drills need no local file paths.
 
 You still provide local secrets in env.
 
-It does the same restore work as `restore local`, then runs the optional check command and stores the result. If your local targets are nonstandard, override them in `config/kamal-backup.local.yml`.
+It does the same restore work as `restore local`, then runs the optional check command and stores the result. Configure any explicit local targets in `config/kamal-backup.local.yml`.
 
 For larger apps, treat `drill local` as a convenience. The main drill should usually be `drill production`.
 

@@ -347,8 +347,9 @@ class CLITest < Minitest::Test
       assert_includes out, 'Add this accessory block to your Kamal deploy config:'
       assert_includes out, 'files:'
       assert_includes out, 'config/kamal-backup.yml:/app/config/kamal-backup.yml:ro'
+      assert_includes out, 'File backups run only for paths explicitly configured in config/kamal-backup.yml.'
       assert_includes out, 'Local restore and drill also require the restic binary on your machine.'
-      assert_includes out, 'Create config/kamal-backup.local.yml only if you need to override those local defaults.'
+      assert_includes out, 'When production paths are configured, set their local targets in config/kamal-backup.local.yml.'
       refute_includes out, 'aliases:'
     end
   end
@@ -665,7 +666,7 @@ class CLITest < Minitest::Test
     assert_equal "ok\n", out
   end
 
-  def test_restore_local_with_destination_uses_remote_defaults_and_local_targets
+  def test_restore_local_with_destination_uses_remote_defaults_and_explicit_local_targets
     fake_bridge = Object.new
     received = {}
 
@@ -697,6 +698,13 @@ class CLITest < Minitest::Test
             host: localhost
         YAML
       )
+      File.write(
+        File.join(config_dir, 'kamal-backup.local.yml'),
+        <<~YAML
+          paths:
+            - storage
+        YAML
+      )
 
       out, = Dir.chdir(dir) do
         capture_io do
@@ -724,7 +732,7 @@ class CLITest < Minitest::Test
       assert_equal 'chatwithwork_development', config.value('PGDATABASE')
       assert_equal 'chatwithwork', config.value('PGUSER')
       assert_equal 'localhost', config.value('PGHOST')
-      assert_equal [File.join(dir, 'storage')], config.backup_paths
+      assert_equal ['storage'], config.backup_paths
       assert_includes out, '"status": "ok"'
     end
   end
@@ -769,6 +777,13 @@ class CLITest < Minitest::Test
             repository: s3:https://s3.example.com/chatwithwork-backups
         YAML
       )
+      File.write(
+        File.join(config_dir, 'kamal-backup.local.yml'),
+        <<~YAML
+          paths:
+            - storage
+        YAML
+      )
 
       out, = Dir.chdir(dir) do
         capture_io do
@@ -793,7 +808,71 @@ class CLITest < Minitest::Test
       assert_equal 'postgres', config.database_adapter
       assert_equal 's3:https://s3.example.com/chatwithwork-backups', config.restic_repository
       assert_equal ['/data/storage'], config.local_restore_source_paths
-      assert_equal [File.join(dir, 'storage')], config.backup_paths
+      assert_equal ['storage'], config.backup_paths
+      assert_includes out, '"status": "ok"'
+    end
+  end
+
+  def test_restore_local_with_deploy_config_does_not_infer_file_paths_for_database_only_backup
+    fake_bridge = Object.new
+    received = {}
+
+    fake_bridge.define_singleton_method(:accessory_name) { |**| 'backup' }
+    fake_bridge.define_singleton_method(:local_restore_defaults) { |**| {} }
+
+    fake_app = Object.new
+    fake_app.define_singleton_method(:restore_to_local_machine) do |_snapshot|
+      { status: 'ok' }
+    end
+
+    Dir.mktmpdir do |dir|
+      config_dir = File.join(dir, 'config')
+      FileUtils.mkdir_p(config_dir)
+      File.write(
+        File.join(config_dir, 'database.yml'),
+        <<~YAML
+          development:
+            adapter: postgresql
+            database: apple_development
+            username: apple
+            host: localhost
+        YAML
+      )
+      File.write(
+        File.join(config_dir, 'kamal-backup.yml'),
+        <<~YAML
+          app: apple
+          accessory: backup
+          databases:
+            - name: app
+              adapter: postgres
+              url: postgres://apple@db:5432/apple_production
+          restic:
+            repository: s3:https://example.com/apple-production-backup
+        YAML
+      )
+
+      out, = Dir.chdir(dir) do
+        capture_io do
+          with_fake_bridge(fake_bridge) do
+            stub_constructor(
+              KamalBackup::App,
+              replacement: proc do |*_, config:, **|
+                received[:config] = config
+                fake_app
+              end
+            ) do
+              KamalBackup::CLI.start(['-c', 'config/deploy.yml', 'restore', 'local', 'latest', '--yes'],
+                                     env: { 'RESTIC_PASSWORD' => 'secret' })
+            end
+          end
+        end
+      end
+
+      config = received.fetch(:config)
+
+      assert_empty config.backup_paths
+      assert_empty config.local_restore_source_paths
       assert_includes out, '"status": "ok"'
     end
   end

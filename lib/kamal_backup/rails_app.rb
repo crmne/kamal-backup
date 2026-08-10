@@ -22,9 +22,6 @@ module KamalBackup
       {}.tap do |defaults|
         defaults.merge!(deploy_defaults)
         defaults.merge!(database_defaults)
-
-        defaults['BACKUP_PATHS'] = local_storage_path if local_storage_path
-
         defaults['KAMAL_BACKUP_STATE_DIR'] = File.join(@cwd, 'tmp', 'kamal-backup')
       end
     end
@@ -88,10 +85,6 @@ module KamalBackup
           {}
         end
       end
-    end
-
-    def local_storage_path
-      File.join(@cwd, 'storage')
     end
 
     def local_database_config

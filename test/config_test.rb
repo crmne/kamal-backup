@@ -133,7 +133,7 @@ class ConfigTest < Minitest::Test
     end
   end
 
-  def test_infers_local_defaults_from_a_rails_postgres_app
+  def test_infers_database_and_state_defaults_from_a_rails_postgres_app
     Dir.mktmpdir do |dir|
       config_dir = File.join(dir, 'config')
       FileUtils.mkdir_p(config_dir)
@@ -167,12 +167,12 @@ class ConfigTest < Minitest::Test
       assert_equal 'app', config.value('PGUSER')
       assert_equal 'app_development', config.value('PGDATABASE')
       assert_equal 'localhost', config.value('PGHOST')
-      assert_equal [File.join(dir, 'storage')], config.backup_paths
+      assert_empty config.backup_paths
       assert_equal File.join(dir, 'tmp', 'kamal-backup'), config.state_dir
     end
   end
 
-  def test_infers_local_defaults_from_a_rails_sqlite_app
+  def test_infers_database_defaults_from_a_rails_sqlite_app
     Dir.mktmpdir do |dir|
       config_dir = File.join(dir, 'config')
       FileUtils.mkdir_p(config_dir)
@@ -190,11 +190,11 @@ class ConfigTest < Minitest::Test
 
       assert_equal 'sqlite', config.database_adapter
       assert_equal File.join(dir, 'storage', 'development.sqlite3'), config.value('SQLITE_DATABASE_PATH')
-      assert_equal [File.join(dir, 'storage')], config.backup_paths
+      assert_empty config.backup_paths
     end
   end
 
-  def test_local_yaml_overrides_inferred_rails_defaults
+  def test_local_yaml_adds_explicit_paths_to_rails_defaults
     Dir.mktmpdir do |dir|
       config_dir = File.join(dir, 'config')
       FileUtils.mkdir_p(config_dir)
@@ -626,6 +626,32 @@ class ConfigTest < Minitest::Test
     config.validate_local_machine_restore
   end
 
+  def test_rails_local_restore_requires_explicit_targets_for_production_file_paths
+    Dir.mktmpdir do |dir|
+      config_dir = File.join(dir, 'config')
+      FileUtils.mkdir_p(config_dir)
+      File.write(
+        File.join(config_dir, 'database.yml'),
+        <<~YAML
+          development:
+            adapter: postgresql
+            database: app_development
+        YAML
+      )
+
+      config = KamalBackup::Config.new(
+        env: {},
+        cwd: dir,
+        defaults: { 'LOCAL_RESTORE_SOURCE_PATHS' => '/data/storage' },
+        config_paths: [KamalBackup::Config::LOCAL_CONFIG_PATH]
+      )
+
+      assert_empty config.backup_paths
+      error = assert_raises(KamalBackup::ConfigurationError) { config.validate_local_machine_restore }
+      assert_match(/local file paths must be explicitly configured/, error.message)
+    end
+  end
+
   def test_local_machine_restore_source_paths_must_match_target_path_count
     config = KamalBackup::Config.new(env: base_env(
       'BACKUP_PATHS' => '/tmp/storage:/tmp/uploads',
@@ -633,7 +659,8 @@ class ConfigTest < Minitest::Test
     ))
 
     error = assert_raises(KamalBackup::ConfigurationError) { config.validate_local_machine_restore }
-    assert_match(/local restore source paths must contain the same number of paths as file paths/, error.message)
+    assert_match(/local file paths must be explicitly configured and match the number of production restore source paths/,
+                 error.message)
   end
 
   def test_retention_args_use_restic_flags

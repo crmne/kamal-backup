@@ -214,7 +214,10 @@ module KamalBackup
       source_paths = local_restore_source_paths
       target_paths = backup_paths
 
-      raise ConfigurationError, 'local restore source paths must contain the same number of paths as file paths' unless source_paths.size == target_paths.size
+      unless source_paths.size == target_paths.size
+        raise ConfigurationError,
+              'local file paths must be explicitly configured and match the number of production restore source paths'
+      end
 
       source_paths.zip(target_paths)
     end

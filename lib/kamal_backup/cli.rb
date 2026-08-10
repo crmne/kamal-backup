@@ -26,15 +26,15 @@ module KamalBackup
         CLI.basename
       end
 
-      desc 'local [SNAPSHOT]', 'Restore the backup into the local database and Active Storage path'
+      desc 'local [SNAPSHOT]', 'Restore the backup into the local database and configured file paths'
       def local(snapshot = 'latest')
-        confirm!("Restore #{snapshot} into the local database and Active Storage path? This will overwrite local data.")
+        confirm!("Restore #{snapshot} into the local database and configured file paths? This will overwrite local data.")
         puts(JSON.pretty_generate(local_restore_app.restore_to_local_machine(snapshot)))
       end
 
       method_option :"confirm-production-restore", type: :boolean, default: false,
                                                    desc: 'Confirm production restore without interactive prompts'
-      desc 'production [SNAPSHOT]', 'Restore the backup into the production database and Active Storage path'
+      desc 'production [SNAPSHOT]', 'Restore the backup into the production database and configured file paths'
       def production(snapshot = 'latest')
         confirm_production_restore!(snapshot)
 
@@ -133,7 +133,7 @@ module KamalBackup
     class_option :config_file, aliases: '-c', type: :string, desc: 'Path to Kamal deploy config file'
     class_option :destination, aliases: '-d', type: :string, desc: 'Kamal destination to use'
     remove_command :tree
-    desc 'restore SUBCOMMAND ...ARGS', 'Restore a database and Active Storage backup locally or into production'
+    desc 'restore SUBCOMMAND ...ARGS', 'Restore database and configured file backups locally or into production'
     subcommand 'restore', RestoreCLI
     desc 'drill SUBCOMMAND ...ARGS', 'Run a restore drill on the local machine or on production infrastructure'
     subcommand 'drill', DrillCLI
@@ -162,7 +162,7 @@ module KamalBackup
 
     method_option :force, type: :boolean, default: false,
                           desc: 'Run a backup even if the configured schedule is not due'
-    desc 'backup', 'Run a due database and Active Storage backup'
+    desc 'backup', 'Run a due database and configured file backup'
     def backup
       if remote_command_mode?
         argv = %w[kamal-backup backup]
@@ -238,10 +238,11 @@ module KamalBackup
       puts
       puts deploy_snippet
       puts
-      puts 'The accessory runs scheduled database and file backups with backup.schedule.'
-      puts 'For most Rails apps, restore local and drill local can infer the development database, Active Storage path, and tmp state directory.'
+      puts 'The accessory runs scheduled database and configured file backups with backup.schedule.'
+      puts 'File backups run only for paths explicitly configured in config/kamal-backup.yml.'
+      puts 'Rails local restores infer the development database and tmp state directory, but never file paths.'
       puts 'Local restore and drill also require the restic binary on your machine.'
-      puts 'Create config/kamal-backup.local.yml only if you need to override those local defaults.'
+      puts 'When production paths are configured, set their local targets in config/kamal-backup.local.yml.'
     end
 
     desc 'schedule', 'Run the foreground scheduler loop'
