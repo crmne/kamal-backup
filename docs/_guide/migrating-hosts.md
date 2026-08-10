@@ -104,6 +104,39 @@ If you have OAuth or webhook integrations, remember their redirect URIs and call
 
 Point DNS at the new host. Lower the TTL a day ahead so propagation is minutes rather than hours.
 
+Two things bite immediately after the record changes, and neither looks like what it is.
+
+**Clear the old host key.** Your hostname now resolves to a different machine, so the entry in
+`~/.ssh/known_hosts` is the old server's. The next deploy builds and pushes the image, then dies at the
+SSH connection with `Net::SSH::HostKeyMismatch`. Nothing in the output mentions DNS or the host move, so
+it reads like a broken deploy:
+
+```sh
+ssh-keygen -R your-app.com
+ssh-keyscan your-app.com >> ~/.ssh/known_hosts
+```
+
+Remove **every** key type for the name, not just the one in the error. A leftover RSA or ECDSA entry from
+the old host fails the same way even once the ED25519 entry is correct.
+
+**Deploy the default destination, not the staging one.** It is tempting to add the production hostname to
+the staging destination that is already running, but the proxy rejects that with
+`host settings conflict with another service`, because that service already claims the staging hostname.
+Deploy the normal configuration instead. Now that DNS points at the new machine, the host entry in your
+main `deploy.yml` resolves there, so a plain `kamal deploy` lands on the new server and claims the
+production hostnames as a separate service:
+
+```sh
+bin/kamal deploy
+```
+
+Then remove the staging containers and its proxy route:
+
+```sh
+bin/kamal app stop -d beta
+docker exec kamal-proxy kamal-proxy remove your-app-web-beta
+```
+
 If there was a window between your backup and the cutover where the old host accepted writes, take a final backup on the old host and restore again on the new one before flipping. For a quiet app this is often unnecessary; check rather than assume.
 
 ### 6. Swap which host backs up
