@@ -63,6 +63,10 @@ bundle exec kamal-backup restore production
 
 This restores the database and any configured file paths into the new host's live targets. Because the new host is not yet serving your domain, "production" here means the new machine's production database, which is exactly what you want.
 
+The restore replaces the database, dropping and recreating the schema first, so it does not matter that the deploy already ran `db:prepare` and created an empty one.
+
+Make sure the accessory's storage volume is **writable**. The documented default has no `:ro`; a backup-only accessory may append it, but then a file restore cannot write Active Storage contents back.
+
 ### 4. Verify before you commit to anything
 
 Click through the beta hostname as a real user. Check row counts, uploaded files, and anything backed by Active Storage. This is the part people skip and then regret.

@@ -66,6 +66,64 @@ class DatabaseAdaptersTest < Minitest::Test
     )
   end
 
+  def test_postgres_current_restore_resets_the_schema_first
+    config = KamalBackup::Config.new(env: base_env(
+      'DATABASE_ADAPTER' => 'postgres',
+      'DATABASE_URL' => 'postgres://app:secret@db/app_production'
+    ))
+    adapter = KamalBackup::Databases::Postgres.new(config, redactor: redactor)
+
+    captured = []
+    fake_restic = Object.new
+    fake_restic.define_singleton_method(:pipe_dump_to_command) do |_snapshot, _filename, _command|
+      captured << :pg_restore
+      KamalBackup::CommandResult.new(stdout: '', stderr: '', status: 0)
+    end
+
+    KamalBackup::Command.stub(:capture, lambda { |spec, **|
+      captured << spec.argv
+      KamalBackup::CommandResult.new(stdout: '', stderr: '', status: 0)
+    }) do
+      adapter.restore_to_current(fake_restic, 'latest', 'dump.pgdump')
+    end
+
+    reset = captured.first
+    assert_kind_of Array, reset, 'schema reset must run before pg_restore'
+    assert_equal 'psql', reset.first
+    assert_includes reset.join(' '), 'DROP SCHEMA IF EXISTS public CASCADE'
+    assert_includes reset.join(' '), 'CREATE SCHEMA public'
+    assert_equal :pg_restore, captured.last
+  end
+
+  def test_postgres_current_restore_raises_when_pg_restore_ignores_errors
+    config = KamalBackup::Config.new(env: base_env(
+      'DATABASE_ADAPTER' => 'postgres',
+      'DATABASE_URL' => 'postgres://app:secret@db/app_production'
+    ))
+    adapter = KamalBackup::Databases::Postgres.new(config, redactor: redactor)
+
+    fake_restic = Object.new
+    fake_restic.define_singleton_method(:pipe_dump_to_command) do |_snapshot, _filename, _command|
+      KamalBackup::CommandResult.new(
+        stdout: '',
+        stderr: "pg_restore: warning: errors ignored on restore: 19\n",
+        status: 0
+      )
+    end
+
+    error = nil
+    KamalBackup::Command.stub(:capture, lambda { |_spec, **|
+      KamalBackup::CommandResult.new(stdout: '', stderr: '', status: 0)
+    }) do
+      error = assert_raises(KamalBackup::CommandError) do
+        adapter.restore_to_current(fake_restic, 'latest', 'dump.pgdump')
+      end
+    end
+
+    assert_includes error.message, '19'
+    assert_includes error.message, 'partially restored'
+  end
+
   def test_postgres_scratch_restore_uses_the_requested_database
     config = KamalBackup::Config.new(env: base_env(
       'DATABASE_ADAPTER' => 'postgres',

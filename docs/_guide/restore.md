@@ -6,6 +6,10 @@ nav_order: 4
 
 Use `restore local` to inspect production data safely on your machine, and `restore production` only for deliberate incident recovery.
 
+`restore production` replaces the target database. For PostgreSQL it drops and recreates the `public` schema before running `pg_restore`, because restoring over an existing schema cannot work reliably: `pg_restore --clean` issues a `DROP` per object, PostgreSQL refuses to drop a table another table still references, and the restore then fails every `CREATE` as "already exists" and every foreign key as unsatisfied. That situation is the norm rather than the exception — Kamal runs `db:prepare` on deploy, so a freshly deployed host already has a schema before you restore onto it.
+
+If `pg_restore` reports ignored errors, the restore fails loudly rather than exiting successfully with a partially populated database.
+
 `kamal-backup` has two restore destinations:
 
 - `restore local`: run on your machine, restore into your local database and explicitly configured local file paths

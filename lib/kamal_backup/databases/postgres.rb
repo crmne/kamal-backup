@@ -34,6 +34,28 @@ module KamalBackup
         CommandSpec.new(argv: argv, env: current_connection)
       end
 
+      # Replace the target schema before restoring.
+      #
+      # pg_restore --clean emits DROP TABLE for each object in the dump, but
+      # PostgreSQL refuses to drop a table another table still references, and
+      # the dump's ordering cannot account for constraints that only exist in
+      # the target. Restoring over a schema Rails already created — which is
+      # every restore onto a freshly deployed host, since Kamal runs db:prepare
+      # on boot — leaves the drops failing, the CREATEs failing as "already
+      # exists", the COPYs never running, and the foreign keys rejected because
+      # the tables they point at are still empty.
+      #
+      # Dropping the schema first sidesteps the ordering problem entirely. This
+      # only runs for restore-to-current, which already means "replace this
+      # database"; scratch restores target a separate database and are
+      # untouched.
+      def restore_to_current(restic, snapshot, filename)
+        reset_current_schema
+        result = super
+        ensure_restore_reported_no_errors(result)
+        result
+      end
+
       def current_restore_command
         connection = current_connection
         database = connection.fetch('PGDATABASE')
@@ -60,6 +82,38 @@ module KamalBackup
       end
 
       private
+
+      # pg_restore exits 0 even when individual objects fail, reporting only
+      # "errors ignored on restore: N" on stderr. A restore that half-applied
+      # and claimed success is worse than one that failed, because the damage
+      # is only discovered later, from the data.
+      def ensure_restore_reported_no_errors(result)
+        stderr = result.respond_to?(:stderr) ? result.stderr.to_s : ''
+        match = stderr.match(/errors ignored on restore:\s*(\d+)/i)
+        return if match.nil? || match[1].to_i.zero?
+
+        raise CommandError.new(
+          "pg_restore reported #{match[1]} ignored error(s); the database is only partially restored. " \
+          'Inspect the output above, resolve the cause, and restore again.',
+          command: current_restore_command,
+          stderr: stderr
+        )
+      end
+
+      def reset_current_schema
+        connection = current_connection
+        argv = ['psql', '--quiet', '--no-psqlrc', '--set', 'ON_ERROR_STOP=1', '--command', RESET_SCHEMA_SQL]
+        Command.capture(CommandSpec.new(argv: argv, env: connection), redactor: redactor)
+      rescue CommandError => e
+        raise CommandError.new(
+          "failed to reset the public schema before restoring: #{e.message}",
+          command: e.command,
+          stderr: e.stderr
+        )
+      end
+
+      RESET_SCHEMA_SQL = 'DROP SCHEMA IF EXISTS public CASCADE; CREATE SCHEMA public;'
+      private_constant :RESET_SCHEMA_SQL
 
       def validate_scratch_restore_target(target)
         raise ConfigurationError, 'scratch database must differ from the current PostgreSQL database' if current_connection.fetch('PGDATABASE') == target

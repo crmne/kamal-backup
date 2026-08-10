@@ -480,6 +480,10 @@ module KamalBackup
       config.validate_restic
       config.validate_database_backup
       config.validate_backup_paths
+      # Check writability up front. This used to be discovered only after
+      # restic had pulled the entire file snapshot, so a read-only mount cost a
+      # full download before failing — the wrong moment to learn about it.
+      config.backup_paths.each { |path| ensure_writable_restore_target(path) }
     end
 
     def validate_production_drill(file_target, database_name, sqlite_path)
