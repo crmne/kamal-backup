@@ -42,9 +42,16 @@ backup:
 ```
 {: data-title="config/kamal-backup.yml"}
 
+`kamal deploy` does **not** boot accessories. Boot them explicitly first, or the app starts against a
+database container that does not exist and fails its health check with a name resolution error:
+
 ```sh
-bin/kamal accessory boot all
+bin/kamal accessory boot all -d beta
+bin/kamal deploy -d beta
 ```
+
+It does not matter that the deploy runs `db:prepare` and creates an empty schema before you restore.
+`restore production` drops and recreates the schema.
 
 ### 2. Take a fresh backup on the old host
 
@@ -58,8 +65,14 @@ Confirm the snapshot you are about to restore is the one you just took.
 ### 3. Restore onto the new host
 
 ```sh
-bundle exec kamal-backup restore production
+bundle exec kamal-backup restore production -d beta
 ```
+
+`--yes` deliberately does not cover this command. For unattended runs pass `--confirm-production-restore`,
+which exists to make the intent explicit rather than incidental.
+
+Keep the local gem and the remote accessory on the same version. `kamal-backup` refuses to run when they
+differ, which is usually a sign the accessory needs `bin/kamal accessory reboot backup`.
 
 This restores the database and any configured file paths into the new host's live targets. Because the new host is not yet serving your domain, "production" here means the new machine's production database, which is exactly what you want.
 
@@ -74,6 +87,16 @@ Click through the beta hostname as a real user. Check row counts, uploaded files
 ```sh
 bundle exec kamal-backup evidence
 ```
+
+Check the encrypted columns specifically. If your framework encrypts data at rest — Rails' Active Record
+Encryption derives its keys from `RAILS_MASTER_KEY` — restored rows are only useful if the new host holds
+the same secret. Row counts matching is not evidence of that; decrypting a value is:
+
+```sh
+bin/kamal app exec -d beta --reuse 'bin/rails runner "puts Credential.first.access_token.present?"'
+```
+
+A host with a different master key restores every byte and then fails to read any of it.
 
 If you have OAuth or webhook integrations, remember their redirect URIs and callback URLs point at your production domain. Either register the beta hostname with those providers, or accept that you are verifying everything else now and those at cutover.
 
