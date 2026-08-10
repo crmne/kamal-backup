@@ -4,10 +4,14 @@ require_relative 'test_helper'
 require 'timeout'
 
 class SchedulerTest < Minitest::Test
-  FakeConfig = Struct.new(:backup_start_delay_seconds, :backup_schedule_seconds)
+  FakeConfig = Struct.new(:backup_start_delay_seconds, :backup_schedule_seconds, :backup_enabled) do
+    def backup_enabled?
+      backup_enabled
+    end
+  end
 
-  def config(delay: 0, schedule: 0)
-    FakeConfig.new(delay, schedule)
+  def config(delay: 0, schedule: 0, enabled: true)
+    FakeConfig.new(delay, schedule, enabled)
   end
 
   def with_restored_traps
@@ -19,6 +23,20 @@ class SchedulerTest < Minitest::Test
   ensure
     Signal.trap('TERM', old_term)
     Signal.trap('INT', old_int)
+  end
+
+  def test_run_does_not_back_up_when_disabled
+    calls = 0
+    scheduler = KamalBackup::Scheduler.new(config(enabled: false)) { calls += 1 }
+
+    with_restored_traps do
+      thread = Thread.new { scheduler.run }
+      sleep 0.2
+      scheduler.instance_variable_set(:@stop, true)
+      Timeout.timeout(5) { thread.join }
+    end
+
+    assert_equal 0, calls, 'scheduler must not take a backup while backups are disabled'
   end
 
   def test_run_invokes_backup_block_until_stopped

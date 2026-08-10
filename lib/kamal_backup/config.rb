@@ -168,6 +168,10 @@ module KamalBackup
       truthy?('KAMAL_BACKUP_ALLOW_SUSPICIOUS_PATHS')
     end
 
+    def backup_enabled?
+      !falsey?('BACKUP_ENABLED')
+    end
+
     def backup_schedule_seconds
       integer('BACKUP_SCHEDULE_SECONDS', 86_400, minimum: 1)
     end

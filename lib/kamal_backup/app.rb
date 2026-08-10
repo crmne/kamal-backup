@@ -32,6 +32,7 @@ module KamalBackup
     def backup(force: false)
       started_at = Time.now.utc
       config.validate_backup
+      return disabled_backup_result(started_at) unless config.backup_enabled? || force
       return skipped_backup_result(started_at) unless force || backup_due?(started_at)
 
       restic.ensure_repository
@@ -134,6 +135,18 @@ module KamalBackup
     def backup_due?(now)
       due_at = next_backup_at
       due_at.nil? || now >= due_at
+    end
+
+    def disabled_backup_result(now)
+      Schema.record(
+        kind: 'backup_result',
+        status: 'skipped',
+        reason: 'disabled',
+        last_backup_at: last_backup_finished_at&.iso8601,
+        next_backup_at: nil,
+        force_command: 'kamal-backup backup --force',
+        finished_at: now.iso8601
+      )
     end
 
     def skipped_backup_result(now)

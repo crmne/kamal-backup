@@ -271,6 +271,7 @@ module KamalBackup
       hash = require_mapping(raw_value, "#{@path} backup")
       env = {}
       env['BACKUP_SCHEDULE_SECONDS'] = normalize_duration(hash['schedule'], "#{@path} backup.schedule") if hash.key?('schedule')
+      env['BACKUP_ENABLED'] = normalize_value(hash['enabled']) if hash.key?('enabled')
       env.compact
     end
 

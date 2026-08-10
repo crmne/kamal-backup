@@ -1,7 +1,7 @@
 ---
 title: Upgrading
 description: Version-by-version upgrade notes for breaking changes and config migrations.
-nav_order: 7
+nav_order: 8
 ---
 
 This page collects version-specific upgrade notes. Read the section for every version newer than the one you currently run.

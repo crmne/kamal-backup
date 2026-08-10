@@ -140,6 +140,13 @@ module KamalBackup
       end
 
       def print_backup_result(result)
+        if result[:status] == 'skipped' && result[:reason] == 'disabled'
+          puts('Backups are disabled for this app (backup.enabled is false).')
+          puts('Set backup.enabled to true and redeploy the accessory to resume scheduled backups.')
+          puts("Run `#{result.fetch(:force_command)}` to take one anyway.")
+          return
+        end
+
         if result[:status] == 'skipped'
           puts("No backup due. Last backup finished at #{result.fetch(:last_backup_at)}.")
           puts("Next backup is due at #{result.fetch(:next_backup_at)}.")

@@ -54,6 +54,7 @@ File backups are opt-in. `kamal-backup` snapshots files only when `paths` is exp
 - `restic.rest.username` and `restic.rest.password`: optional restic REST server credentials. These become `RESTIC_REST_USERNAME` and `RESTIC_REST_PASSWORD`.
 - `restic.init_if_missing`: run `restic init` when the repository has not been initialized yet.
 - `backup.schedule`: how often the accessory runs backups. `1d` means once per day.
+- `backup.enabled`: whether the accessory takes scheduled backups. Defaults to `true`. Set it to `false` to bring an accessory up that can restore, list and check, but will never write a backup of its own. See [Migrating to a new host](/migrating-hosts/).
 
 For MySQL, change the database settings:
 

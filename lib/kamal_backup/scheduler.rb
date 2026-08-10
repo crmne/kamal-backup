@@ -15,6 +15,17 @@ module KamalBackup
       $stderr.sync = true
 
       install_signal_handlers
+
+      unless @config.backup_enabled?
+        # Stay up rather than exit: the accessory is still how restore, list, check and
+        # evidence reach the repository, and exiting would restart-loop under Kamal's
+        # `--restart unless-stopped`. Set backup.enabled to true and redeploy to resume.
+        log('scheduled backups are disabled (backup.enabled is false); no backups will be taken')
+        idle_until_stopped
+        log("scheduler stopped at #{Time.now.utc.iso8601}")
+        return
+      end
+
       sleep_interruptibly(@config.backup_start_delay_seconds)
 
       until @stop
@@ -41,6 +52,10 @@ module KamalBackup
       rescue ArgumentError
         nil
       end
+    end
+
+    def idle_until_stopped
+      sleep 1 until @stop
     end
 
     def sleep_interruptibly(seconds)

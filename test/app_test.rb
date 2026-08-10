@@ -208,6 +208,69 @@ class AppTest < Minitest::Test
     end
   end
 
+  def test_backup_skips_when_disabled
+    Dir.mktmpdir do |dir|
+      db = File.join(dir, 'app.sqlite3')
+      files = File.join(dir, 'storage')
+      state = File.join(dir, 'state')
+      File.write(db, '')
+      FileUtils.mkdir_p(files)
+      FileUtils.mkdir_p(state)
+      restic = FakeRestic.new
+      database = FakeDatabase.new
+
+      app = KamalBackup::App.new(
+        env: base_env(
+          'DATABASE_ADAPTER' => 'sqlite',
+          'SQLITE_DATABASE_PATH' => db,
+          'BACKUP_PATHS' => files,
+          'KAMAL_BACKUP_STATE_DIR' => state,
+          'BACKUP_ENABLED' => 'false'
+        ),
+        restic: restic,
+        database: database
+      )
+
+      result = app.backup
+
+      assert_equal 'skipped', result.fetch(:status)
+      assert_equal 'disabled', result.fetch(:reason)
+      assert_equal 0, restic.ensure_repository_calls
+      assert_equal 0, database.backup_calls.size
+      assert_equal 0, restic.backup_path_calls.size
+    end
+  end
+
+  def test_backup_force_overrides_disabled
+    Dir.mktmpdir do |dir|
+      db = File.join(dir, 'app.sqlite3')
+      files = File.join(dir, 'storage')
+      state = File.join(dir, 'state')
+      File.write(db, '')
+      FileUtils.mkdir_p(files)
+      FileUtils.mkdir_p(state)
+      restic = FakeRestic.new
+      database = FakeDatabase.new
+
+      app = KamalBackup::App.new(
+        env: base_env(
+          'DATABASE_ADAPTER' => 'sqlite',
+          'SQLITE_DATABASE_PATH' => db,
+          'BACKUP_PATHS' => files,
+          'KAMAL_BACKUP_STATE_DIR' => state,
+          'BACKUP_ENABLED' => 'false'
+        ),
+        restic: restic,
+        database: database
+      )
+
+      result = app.backup(force: true)
+
+      assert_equal 'backup_result', result.fetch(:kind)
+      assert_equal 1, database.backup_calls.size
+    end
+  end
+
   def test_backup_force_runs_even_when_last_backup_is_not_due
     Dir.mktmpdir do |dir|
       db = File.join(dir, 'app.sqlite3')
