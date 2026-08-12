@@ -21,13 +21,14 @@ Restic is the right backend here because it provides:
 - deduplication across repeated backup runs;
 - retention and prune commands;
 - repository health checks;
-- S3-compatible object storage, restic REST server, and filesystem repository support.
+- S3-compatible object storage, SFTP, restic REST server, and filesystem repository support.
 
 That lets `kamal-backup` stay Rails- and Kamal-focused instead of inventing a custom backup format.
 
 In normal Kamal use, you do not install restic on the Rails app host. The backup accessory image already contains the `restic` binary. You point that accessory at a restic repository, usually:
 
 - S3-compatible object storage;
+- an SFTP server reached with a dedicated SSH key;
 - a restic REST server;
 - a filesystem path for local development.
 

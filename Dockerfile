@@ -13,6 +13,7 @@ RUN apt-get update \
     ca-certificates \
     curl \
     mariadb-client \
+    openssh-client \
     postgresql-client-common \
     sqlite3 \
     tini \
@@ -28,6 +29,7 @@ RUN apt-get update \
   && bunzip2 /tmp/restic.bz2 \
   && install -m 0755 /tmp/restic /usr/local/bin/restic \
   && restic version \
+  && ssh -V \
   && rm -rf /var/lib/apt/lists/* /tmp/restic
 
 WORKDIR /app
@@ -43,6 +45,7 @@ COPY exe ./exe
 COPY lib ./lib
 
 RUN ln -s /app/exe/kamal-backup /usr/local/bin/kamal-backup \
+  && mkdir -p -m 0700 /root/.ssh \
   && mkdir -p /var/lib/kamal-backup /restore/files
 
 ENTRYPOINT ["/usr/bin/tini", "--"]

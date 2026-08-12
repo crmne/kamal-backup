@@ -17,6 +17,10 @@ Do not put cloud credentials in clear Kamal environment. Use Kamal secrets for:
 
 Store a copy of `RESTIC_PASSWORD` outside the app repository and outside the S3 bucket. Restic repositories are encrypted with that password; without it, the backup data is not recoverable.
 
+For SFTP repositories, use a dedicated SSH key restricted to the backup account and repository path. Mount only that
+key and a verified `known_hosts` file into the accessory; do not expose the Kamal host's entire `.ssh` directory. The
+SSH credential controls access to the repository host, while `RESTIC_PASSWORD` separately encrypts the repository.
+
 ## Subprocess execution
 
 External tools are executed with argument arrays, not shell interpolation. The backup container does not need application source code.

@@ -49,7 +49,7 @@ File backups are opt-in. `kamal-backup` snapshots files only when `paths` is exp
 - `app`: the app tag used on restic snapshots.
 - `databases`: one or more PostgreSQL, MySQL/MariaDB, or SQLite databases to back up.
 - `paths`: optional filesystem paths to snapshot from mounted volumes. Entries can be strings or mappings with `path` and `exclude`. No files are backed up when this is omitted or empty.
-- `restic.repository`: the restic repository location, such as S3-compatible storage, a restic REST server, or a filesystem path.
+- `restic.repository`: the restic repository location, such as S3-compatible storage, SFTP, a restic REST server, or a filesystem path.
 - `restic.password.secret`: the Kamal secret env var that contains the restic password.
 - `restic.rest.username` and `restic.rest.password`: optional restic REST server credentials. These become `RESTIC_REST_USERNAME` and `RESTIC_REST_PASSWORD`.
 - `restic.init_if_missing`: run `restic init` when the repository has not been initialized yet.
@@ -168,6 +168,38 @@ restic:
       secret: RESTIC_REST_PASSWORD
 ```
 {: data-title="config/kamal-backup.yml"}
+
+## SFTP repositories
+
+The accessory image includes an SSH client, so restic can use an SFTP repository:
+
+```yaml
+restic:
+  repository: sftp:backup@backups.example.com:/srv/restic/your-app
+  password:
+    secret: RESTIC_PASSWORD
+```
+{: data-title="config/kamal-backup.yml"}
+
+Restic's SFTP backend needs non-interactive SSH authentication. Create a dedicated key for this accessory, authorize
+its public key for a restricted account on the repository host, and bind-mount only that private key and a verified
+`known_hosts` file:
+
+```yaml
+accessories:
+  backup:
+    volumes:
+      - "/etc/kamal-backup/ssh/id_ed25519:/root/.ssh/id_ed25519:ro"
+      - "/etc/kamal-backup/ssh/known_hosts:/root/.ssh/known_hosts:ro"
+```
+{: data-title="config/deploy.yml"}
+
+Create those files on every Kamal host that can run the accessory, and verify the repository host's fingerprint before
+adding it to `known_hosts`. Do not mount the Kamal host's entire `.ssh` directory: a dedicated key limits what a
+compromised accessory can reach. SSH authentication setup and key rotation remain the operator's responsibility.
+
+`RESTIC_PASSWORD` encrypts the restic repository; it is not the SSH account password. Password-prompt authentication
+is unsuitable for unattended backups, so the image does not include `sshpass`.
 
 If you do not want the restic password value in the process environment, point restic at a mounted file instead:
 

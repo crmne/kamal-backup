@@ -62,6 +62,7 @@ File backups are opt-in: only paths explicitly listed under `paths` are included
 Before you boot the accessory, decide where the encrypted restic repository will live. Common choices are:
 
 - S3-compatible object storage;
+- an SFTP server reached with a dedicated SSH key;
 - a restic REST server you run separately;
 - a filesystem path for local development.
 
