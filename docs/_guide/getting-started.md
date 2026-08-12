@@ -63,6 +63,7 @@ Before you boot the accessory, decide where the encrypted restic repository will
 
 - S3-compatible object storage;
 - an SFTP server reached with a dedicated SSH key;
+- any configured rclone remote;
 - a restic REST server you run separately;
 - a filesystem path for local development.
 

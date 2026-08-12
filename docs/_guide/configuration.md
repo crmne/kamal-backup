@@ -49,7 +49,7 @@ File backups are opt-in. `kamal-backup` snapshots files only when `paths` is exp
 - `app`: the app tag used on restic snapshots.
 - `databases`: one or more PostgreSQL, MySQL/MariaDB, or SQLite databases to back up.
 - `paths`: optional filesystem paths to snapshot from mounted volumes. Entries can be strings or mappings with `path` and `exclude`. No files are backed up when this is omitted or empty.
-- `restic.repository`: the restic repository location, such as S3-compatible storage, SFTP, a restic REST server, or a filesystem path.
+- `restic.repository`: the restic repository location, such as S3-compatible storage, SFTP, rclone, a restic REST server, or a filesystem path.
 - `restic.password.secret`: the Kamal secret env var that contains the restic password.
 - `restic.rest.username` and `restic.rest.password`: optional restic REST server credentials. These become `RESTIC_REST_USERNAME` and `RESTIC_REST_PASSWORD`.
 - `restic.init_if_missing`: run `restic init` when the repository has not been initialized yet.
@@ -168,6 +168,63 @@ restic:
       secret: RESTIC_REST_PASSWORD
 ```
 {: data-title="config/kamal-backup.yml"}
+
+## Repository backends
+
+The accessory passes restic's supported backend environment variables through to restic. Choose the repository
+prefix and supply its credentials as Kamal secrets:
+
+| Repository | Prefix or form | Typical configuration |
+| --- | --- | --- |
+| Filesystem | `/path/to/repository` | Mount persistent storage at that path. |
+| REST server | `rest:https://…` | `RESTIC_REST_USERNAME`, `RESTIC_REST_PASSWORD` |
+| S3-compatible | `s3:https://…` or `s3:region:bucket` | `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY` |
+| SFTP | `sftp:user@host:/path` | Dedicated SSH key and verified `known_hosts` |
+| Backblaze B2 | `b2:bucket:path` | `B2_ACCOUNT_ID`, `B2_ACCOUNT_KEY` |
+| Azure Blob Storage | `azure:container:/path` | The applicable `AZURE_*` variables |
+| Google Cloud Storage | `gs:bucket:/path` | The applicable `GOOGLE_*` variables |
+| OpenStack Swift | `swift:container:/path` | The applicable `OS_*`, `ST_*`, or `HP_*` variables |
+| rclone | `rclone:remote:path` | An rclone config file or `RCLONE_CONFIG_<REMOTE>_*` variables |
+
+Consult [restic's repository guide](https://restic.readthedocs.io/en/v0.18.1/030_preparing_a_new_repo.html)
+for the backend-specific variables. Never put credentials directly in `config/kamal-backup.yml`.
+
+## Rclone repositories
+
+The accessory includes rclone, and restic officially supports using it to reach services outside restic's native
+backends. Once a remote named `archive` works in rclone, use it directly:
+
+```yaml
+restic:
+  repository: rclone:archive:kamal-backup/your-app
+  password:
+    secret: RESTIC_PASSWORD
+```
+{: data-title="config/kamal-backup.yml"}
+
+For an existing rclone config, mount only that file and tell rclone where it is:
+
+```yaml
+accessories:
+  backup:
+    env:
+      clear:
+        RCLONE_CONFIG: /run/kamal-backup/rclone.conf
+      secret:
+        - RCLONE_CONFIG_PASS
+    volumes:
+      - "/etc/kamal-backup/rclone.conf:/run/kamal-backup/rclone.conf:ro"
+```
+{: data-title="config/deploy.yml"}
+
+`RCLONE_CONFIG_PASS` is needed only when the config file is encrypted. Keep the config file outside the app
+repository when it contains tokens or credentials. You can instead configure a remote entirely through Kamal env,
+using rclone's `RCLONE_CONFIG_<REMOTE>_TYPE` and backend-specific variables; `kamal-backup` passes every
+`RCLONE_*` variable through to restic and redacts secret values in its own output.
+
+Restic starts and stops `rclone serve restic --stdio` itself—do not run a separate rclone daemon. See restic's
+[rclone backend documentation](https://restic.readthedocs.io/en/v0.18.1/030_preparing_a_new_repo.html#other-services-via-rclone)
+and the official [rclone backend announcement](https://restic.net/blog/2018-04-01/rclone-backend/).
 
 ## SFTP repositories
 

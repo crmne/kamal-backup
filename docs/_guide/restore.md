@@ -6,7 +6,15 @@ nav_order: 4
 
 Use `restore local` to inspect production data safely on your machine, and `restore production` only for deliberate incident recovery.
 
-`restore production` replaces the target database. For PostgreSQL it drops and recreates the `public` schema before running `pg_restore`, because restoring over an existing schema cannot work reliably: `pg_restore --clean` issues a `DROP` per object, PostgreSQL refuses to drop a table another table still references, and the restore then fails every `CREATE` as "already exists" and every foreign key as unsatisfied. That situation is the norm rather than the exception — Kamal runs `db:prepare` on deploy, so a freshly deployed host already has a schema before you restore onto it.
+`restore production` replaces the target database rather than layering a dump over whatever is already there:
+
+- PostgreSQL removes every non-system schema, recreates `public`, then restores with a client matching server majors 14–18.
+- MySQL/MariaDB removes existing views, tables, MariaDB sequences, routines, and events before importing the dump.
+- SQLite validates the downloaded backup, replaces the live database through SQLite's backup API, then checks the restored database again.
+
+For PostgreSQL, resetting the user schemas avoids a common failure mode: `pg_restore --clean` issues one `DROP` per object,
+but target-only foreign keys can prevent those drops, after which creates and data loads fail. This is the norm on a
+fresh Kamal host because the application commonly runs `db:prepare` before the restore.
 
 If `pg_restore` reports ignored errors, the restore fails loudly rather than exiting successfully with a partially populated database.
 
@@ -49,6 +57,7 @@ You still provide the local secrets yourself in env:
 - the database password env vars declared in your local config, or `PGPASSWORD`/`MYSQL_PWD` when using env-only settings
 
 And you need the `restic` binary installed locally and available on `PATH`.
+If the repository uses the `rclone:` backend, rclone must also be installed and configured on your machine.
 
 Example:
 
@@ -86,6 +95,18 @@ If the production file paths differ from your local file paths and you are not u
 
 This is the emergency path: restore back into the live production database and explicitly configured production file paths.
 
+Stop the application, job workers, and every other database or SQLite writer before restoring, and keep them stopped
+until the restore succeeds. PostgreSQL and MySQL restores intentionally reset existing objects; SQLite refuses a
+restore when another writer holds the database lock. A typical sequence is:
+
+```sh
+bin/kamal app stop -d production
+bundle exec kamal-backup -d production restore production latest
+bin/kamal deploy -d production
+```
+
+Use the commands appropriate to your destination, but preserve that stop → restore → verify → start order.
+
 From your app checkout:
 
 ```sh
@@ -113,6 +134,26 @@ first prevents a failed or read-only file restore from leaving the database at a
 This is intentionally not a quiet operation. `restore production` is for real incident recovery.
 
 `restore production` does not accept `--yes` as a confirmation shortcut. Interactive use asks you to type the app name and `RESTORE PRODUCTION`. Automation must pass the explicit `--confirm-production-restore` flag.
+
+The accessory image selects PostgreSQL 14, 15, 16, 17, or 18 client tools to match the target server. A local
+PostgreSQL restore uses the tools installed on your machine; install a client matching the local target's major
+version. Restores require privileges to replace the target schema or database objects.
+MySQL/MariaDB restores that contain routines, triggers, or events also require the corresponding database privileges;
+MySQL servers with binary logging may require `log_bin_trust_function_creators=1` or an administrative restore user.
+
+## Validated database versions
+
+The automated restore matrix exercises exact backup and restore behavior against:
+
+| Database | Versions |
+| --- | --- |
+| PostgreSQL | 14, 15, 16, 17, and 18 |
+| MySQL | 8.0 and 8.4 (LTS) |
+| MariaDB | 10.11, 11.4, and 11.8 LTS |
+| SQLite | The SQLite client shipped in the accessory image, including WAL-mode databases |
+
+The matrix verifies data, views, routines, triggers, events, custom PostgreSQL schemas, MariaDB sequences, and removal
+of objects that exist only in the restore target. SQLite is also exercised through restic's rclone backend.
 
 ## Prompts and safety
 

@@ -13,6 +13,7 @@ Do not put cloud credentials in clear Kamal environment. Use Kamal secrets for:
 - `RESTIC_PASSWORD`;
 - `AWS_ACCESS_KEY_ID`;
 - `AWS_SECRET_ACCESS_KEY`;
+- rclone tokens, passwords, and `RCLONE_CONFIG_PASS`;
 - database passwords such as `DATABASE_PASSWORD`, `PGPASSWORD`, or `MYSQL_PWD`.
 
 Store a copy of `RESTIC_PASSWORD` outside the app repository and outside the S3 bucket. Restic repositories are encrypted with that password; without it, the backup data is not recoverable.
@@ -20,6 +21,9 @@ Store a copy of `RESTIC_PASSWORD` outside the app repository and outside the S3 
 For SFTP repositories, use a dedicated SSH key restricted to the backup account and repository path. Mount only that
 key and a verified `known_hosts` file into the accessory; do not expose the Kamal host's entire `.ssh` directory. The
 SSH credential controls access to the repository host, while `RESTIC_PASSWORD` separately encrypts the repository.
+
+For rclone repositories, mount only the required rclone config file, read-only. Keep it outside the app repository
+when it contains credentials, and supply its encryption password as the Kamal secret `RCLONE_CONFIG_PASS`.
 
 ## Subprocess execution
 
@@ -34,6 +38,8 @@ Database backups use database-native export tools:
 - SQLite: `sqlite3 <db> ".backup ..."`
 
 This is why the docs talk about database backups rather than raw database directories. `kamal-backup` is exporting application data with the tools Rails teams already use for dumps and restores.
+
+Database passwords passed as `PGPASSWORD` or `MYSQL_PWD` are redacted from command summaries and failure output.
 
 ## Active Storage backups
 

@@ -84,7 +84,8 @@ module KamalBackup
         mysql_dump: version_for(['mariadb-dump', '--version'], ['mysqldump', '--version']),
         mysql_client: version_for(['mariadb', '--version'], ['mysql', '--version']),
         sqlite3: version_for(['sqlite3', '--version']),
-        restic: version_for(%w[restic version])
+        restic: version_for(%w[restic version]),
+        rclone: version_for(%w[rclone version])
       }
     end
 

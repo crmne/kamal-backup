@@ -125,7 +125,7 @@ bundle exec kamal-backup evidence
 
 - **Scheduled backups:** the accessory runs continuously and backs up on `backup.schedule`.
 - **Database and Active Storage coverage:** database dumps plus file-backed Active Storage files from mounted volumes.
-- **Restic underneath:** encrypted, deduplicated snapshots in S3-compatible storage, over SFTP, in a restic REST server, or in a filesystem repository.
+- **Restic underneath:** encrypted, deduplicated snapshots in native restic backends or any rclone remote; the accessory includes both rclone and an SSH client.
 - **Local restores:** inspect production data safely in your local Rails app.
 - **Restore drills:** restore into scratch production-side targets, run verification commands, and record the result.
 - **Security review evidence:** `kamal-backup evidence` prints redacted JSON with latest snapshots, `kamal-backup check` results, drills, retention, and tool versions.

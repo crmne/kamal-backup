@@ -349,6 +349,30 @@ class ResticTest < Minitest::Test
     end
   end
 
+  def test_restic_env_passes_credentials_for_supported_backends
+    config = KamalBackup::Config.new(env: base_env(
+      'B2_ACCOUNT_KEY' => 'b2-secret',
+      'AZURE_ACCOUNT_KEY' => 'azure-secret',
+      'GOOGLE_APPLICATION_CREDENTIALS' => '/run/secrets/google.json',
+      'OS_PASSWORD' => 'swift-secret',
+      'ST_KEY' => 'swift-v1-secret',
+      'HP_SECRET_KEY' => 'swift-legacy-secret',
+      'RCLONE_CONFIG_PASS' => 'rclone-secret',
+      'UNRELATED_VALUE' => 'excluded'
+    ))
+    restic = KamalBackup::Restic.new(config, redactor: KamalBackup::Redactor.new(env: config.env))
+    restic_env = restic.send(:restic_env)
+
+    assert_equal 'b2-secret', restic_env.fetch('B2_ACCOUNT_KEY')
+    assert_equal 'azure-secret', restic_env.fetch('AZURE_ACCOUNT_KEY')
+    assert_equal '/run/secrets/google.json', restic_env.fetch('GOOGLE_APPLICATION_CREDENTIALS')
+    assert_equal 'swift-secret', restic_env.fetch('OS_PASSWORD')
+    assert_equal 'swift-v1-secret', restic_env.fetch('ST_KEY')
+    assert_equal 'swift-legacy-secret', restic_env.fetch('HP_SECRET_KEY')
+    assert_equal 'rclone-secret', restic_env.fetch('RCLONE_CONFIG_PASS')
+    refute restic_env.key?('UNRELATED_VALUE')
+  end
+
   class InitTrackingRestic < KamalBackup::Restic
     attr_reader :calls
 

@@ -30,11 +30,12 @@ module KamalBackup
       end
 
       def dump_command
-        argv = %w[pg_dump --format=custom --no-owner --no-privileges]
-        CommandSpec.new(argv: argv, env: current_connection)
+        connection = current_connection
+        argv = [postgres_binary('pg_dump', connection)] + %w[--format=custom --no-owner --no-privileges]
+        CommandSpec.new(argv: argv, env: connection)
       end
 
-      # Replace the target schema before restoring.
+      # Replace the target's user schemas before restoring.
       #
       # pg_restore --clean emits DROP TABLE for each object in the dump, but
       # PostgreSQL refuses to drop a table another table still references, and
@@ -45,13 +46,21 @@ module KamalBackup
       # exists", the COPYs never running, and the foreign keys rejected because
       # the tables they point at are still empty.
       #
-      # Dropping the schema first sidesteps the ordering problem entirely. This
-      # only runs for restore-to-current, which already means "replace this
-      # database"; scratch restores target a separate database and are
-      # untouched.
+      # Dropping every non-system schema first sidesteps the ordering problem
+      # entirely and removes target-only custom schemas as well as public.
+      # Current and scratch restores both promise that the target represents
+      # the selected snapshot, so both paths reset their target schema.
       def restore_to_current(restic, snapshot, filename)
-        reset_current_schema
+        reset_schema(current_connection)
         result = super
+        ensure_restore_reported_no_errors(result)
+        result
+      end
+
+      def restore_to_scratch(restic, snapshot, filename, target:)
+        validate_scratch_restore_target(target)
+        reset_schema(current_connection.merge('PGDATABASE' => target))
+        result = restic.pipe_dump_to_command(snapshot, filename, scratch_restore_command(target))
         ensure_restore_reported_no_errors(result)
         result
       end
@@ -60,7 +69,8 @@ module KamalBackup
         connection = current_connection
         database = connection.fetch('PGDATABASE')
 
-        argv = %w[pg_restore --clean --if-exists --no-owner --no-privileges --dbname]
+        argv = [postgres_binary('pg_restore', connection)] +
+               %w[--clean --if-exists --no-owner --no-privileges --exit-on-error --dbname]
         argv << database
         CommandSpec.new(argv: argv, env: connection)
       end
@@ -68,7 +78,8 @@ module KamalBackup
       def scratch_restore_command(target)
         connection = current_connection.merge('PGDATABASE' => target)
 
-        argv = %w[pg_restore --clean --if-exists --no-owner --no-privileges --dbname]
+        argv = [postgres_binary('pg_restore', connection)] +
+               %w[--clean --if-exists --no-owner --no-privileges --exit-on-error --dbname]
         argv << target
         CommandSpec.new(argv: argv, env: connection)
       end
@@ -100,20 +111,71 @@ module KamalBackup
         )
       end
 
-      def reset_current_schema
-        connection = current_connection
-        argv = ['psql', '--quiet', '--no-psqlrc', '--set', 'ON_ERROR_STOP=1', '--command', RESET_SCHEMA_SQL]
+      def reset_schema(connection)
+        argv = [postgres_binary('psql', connection), '--quiet', '--no-psqlrc', '--set', 'ON_ERROR_STOP=1',
+                '--command', RESET_SCHEMAS_SQL]
         Command.capture(CommandSpec.new(argv: argv, env: connection), redactor: redactor)
       rescue CommandError => e
         raise CommandError.new(
-          "failed to reset the public schema before restoring: #{e.message}",
+          "failed to reset PostgreSQL schemas before restoring: #{e.message}",
           command: e.command,
           stderr: e.stderr
         )
       end
 
-      RESET_SCHEMA_SQL = 'DROP SCHEMA IF EXISTS public CASCADE; CREATE SCHEMA public;'
-      private_constant :RESET_SCHEMA_SQL
+      RESET_SCHEMAS_SQL = <<~SQL
+        DO $$
+        DECLARE
+          schema_name text;
+        BEGIN
+          FOR schema_name IN
+            SELECT nspname
+              FROM pg_namespace
+             WHERE nspname !~ '^pg_'
+               AND nspname <> 'information_schema'
+          LOOP
+            EXECUTE format('DROP SCHEMA %I CASCADE', schema_name);
+          END LOOP;
+        END
+        $$;
+        CREATE SCHEMA public;
+      SQL
+      private_constant :RESET_SCHEMAS_SQL
+
+      def postgres_binary(name, connection)
+        root = value('KAMAL_BACKUP_POSTGRES_CLIENT_ROOT')
+        return name if root.to_s.empty?
+
+        major = postgres_server_major(connection)
+        binary = File.join(root, major.to_s, 'bin', name)
+        return binary if File.executable?(binary)
+
+        supported = Dir[File.join(root, '*', 'bin', name)].filter_map do |path|
+          path.split(File::SEPARATOR)[-3] if File.executable?(path)
+        end.sort
+        raise ConfigurationError,
+              "PostgreSQL #{major} is not supported by this accessory image; available client versions: #{supported.join(', ')}"
+      end
+
+      def postgres_server_major(connection)
+        @postgres_server_majors ||= {}
+        key = connection.values_at('PGHOST', 'PGPORT', 'PGUSER', 'PGDATABASE', 'PGSERVICE')
+        @postgres_server_majors[key] ||= begin
+          probe = value('KAMAL_BACKUP_POSTGRES_PROBE_BIN') || 'psql'
+          result = Command.capture(
+            CommandSpec.new(
+              argv: [probe, '--no-psqlrc', '--tuples-only', '--no-align', '--command', 'SHOW server_version_num'],
+              env: connection
+            ),
+            redactor: redactor,
+            log: false
+          )
+          version_number = Integer(result.stdout.strip, 10)
+          version_number / 10_000
+        rescue ArgumentError
+          raise ConfigurationError, 'could not determine the PostgreSQL server version'
+        end
+      end
 
       def validate_scratch_restore_target(target)
         raise ConfigurationError, 'scratch database must differ from the current PostgreSQL database' if current_connection.fetch('PGDATABASE') == target

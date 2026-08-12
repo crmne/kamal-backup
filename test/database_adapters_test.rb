@@ -66,6 +66,43 @@ class DatabaseAdaptersTest < Minitest::Test
     )
   end
 
+  def test_postgres_selects_the_client_matching_the_server
+    Dir.mktmpdir do |dir|
+      binary = File.join(dir, '16', 'bin', 'pg_dump')
+      FileUtils.mkdir_p(File.dirname(binary))
+      File.write(binary, '')
+      FileUtils.chmod('+x', binary)
+      config = KamalBackup::Config.new(env: base_env(
+        'DATABASE_ADAPTER' => 'postgres',
+        'DATABASE_URL' => 'postgres://app:secret@db/app',
+        'KAMAL_BACKUP_POSTGRES_CLIENT_ROOT' => dir
+      ))
+      adapter = KamalBackup::Databases::Postgres.new(config, redactor: redactor)
+      version = KamalBackup::CommandResult.new(stdout: "160012\n", stderr: '', status: 0)
+
+      KamalBackup::Command.stub(:capture, version) do
+        assert_equal binary, adapter.dump_command.argv.first
+      end
+    end
+  end
+
+  def test_postgres_rejects_a_server_without_a_matching_client
+    Dir.mktmpdir do |dir|
+      config = KamalBackup::Config.new(env: base_env(
+        'DATABASE_ADAPTER' => 'postgres',
+        'DATABASE_URL' => 'postgres://app:secret@db/app',
+        'KAMAL_BACKUP_POSTGRES_CLIENT_ROOT' => dir
+      ))
+      adapter = KamalBackup::Databases::Postgres.new(config, redactor: redactor)
+      version = KamalBackup::CommandResult.new(stdout: "130018\n", stderr: '', status: 0)
+
+      KamalBackup::Command.stub(:capture, version) do
+        error = assert_raises(KamalBackup::ConfigurationError) { adapter.dump_command }
+        assert_includes error.message, 'PostgreSQL 13 is not supported'
+      end
+    end
+  end
+
   def test_postgres_current_restore_resets_the_schema_first
     config = KamalBackup::Config.new(env: base_env(
       'DATABASE_ADAPTER' => 'postgres',
@@ -90,7 +127,8 @@ class DatabaseAdaptersTest < Minitest::Test
     reset = captured.first
     assert_kind_of Array, reset, 'schema reset must run before pg_restore'
     assert_equal 'psql', reset.first
-    assert_includes reset.join(' '), 'DROP SCHEMA IF EXISTS public CASCADE'
+    assert_includes reset.join(' '), "nspname <> 'information_schema'"
+    assert_includes reset.join(' '), 'DROP SCHEMA %I CASCADE'
     assert_includes reset.join(' '), 'CREATE SCHEMA public'
     assert_equal :pg_restore, captured.last
   end
@@ -180,6 +218,57 @@ class DatabaseAdaptersTest < Minitest::Test
     assert_equal 'mysql', command.argv.first
     assert_includes command.argv, 'app_development'
     assert_equal({ 'MYSQL_PWD' => 'secret' }, command.env)
+  end
+
+  def test_mysql_current_restore_removes_objects_that_are_not_in_the_snapshot
+    config = KamalBackup::Config.new(env: base_env(
+      'DATABASE_ADAPTER' => 'mysql',
+      'DATABASE_URL' => 'mysql2://app:secret@mysql:3306/app_development',
+      'MYSQL_CLIENT_BIN' => 'mysql'
+    ))
+    adapter = KamalBackup::Databases::Mysql.new(config, redactor: redactor)
+    calls = []
+    restic = Object.new
+    restic.define_singleton_method(:pipe_dump_to_command) do |_snapshot, _filename, _command|
+      calls << :restore
+      KamalBackup::CommandResult.new(stdout: '', stderr: '', status: 0)
+    end
+    inventory = [
+      "VIEW\t#{'stale_view'.unpack1('H*')}",
+      "TABLE\t#{'stale_table'.unpack1('H*')}",
+      "SEQUENCE\t#{'stale_sequence'.unpack1('H*')}",
+      "PROCEDURE\t#{'stale_proc'.unpack1('H*')}",
+      ''
+    ].join("\n")
+
+    KamalBackup::Command.stub(:capture, lambda { |spec, **options|
+      if spec.argv.include?('--execute')
+        KamalBackup::CommandResult.new(stdout: inventory, stderr: '', status: 0)
+      else
+        calls << options.fetch(:input)
+        KamalBackup::CommandResult.new(stdout: '', stderr: '', status: 0)
+      end
+    }) do
+      adapter.restore_to_current(restic, 'latest', 'dump.sql')
+    end
+
+    reset_sql = calls.first
+    assert_includes reset_sql, 'DROP VIEW IF EXISTS `stale_view`;'
+    assert_includes reset_sql, 'DROP TABLE IF EXISTS `stale_table`;'
+    assert_includes reset_sql, 'DROP SEQUENCE IF EXISTS `stale_sequence`;'
+    assert_includes reset_sql, 'DROP PROCEDURE IF EXISTS `stale_proc`;'
+    assert_equal :restore, calls.last
+  end
+
+  def test_mysql_reset_quotes_identifiers
+    config = KamalBackup::Config.new(env: base_env(
+      'DATABASE_ADAPTER' => 'mysql',
+      'DATABASE_URL' => 'mysql2://app:secret@mysql/app',
+      'MYSQL_CLIENT_BIN' => 'mysql'
+    ))
+    adapter = KamalBackup::Databases::Mysql.new(config, redactor: redactor)
+
+    assert_equal '`strange``table`', adapter.send(:quote_identifier, 'strange`table')
   end
 
   def test_mysql_scratch_restore_uses_the_requested_database
@@ -335,6 +424,17 @@ class DatabaseAdaptersTest < Minitest::Test
 
     error = assert_raises(KamalBackup::ConfigurationError) { adapter.dump_command }
     assert_match(/invalid database URL/, error.message)
+  end
+
+  def test_mysql_rejects_a_non_mysql_url
+    config = KamalBackup::Config.new(env: base_env(
+      'DATABASE_ADAPTER' => 'mysql',
+      'DATABASE_URL' => 'postgres://app:secret@mysql/app'
+    ))
+    adapter = KamalBackup::Databases::Mysql.new(config, redactor: redactor)
+
+    error = assert_raises(KamalBackup::ConfigurationError) { adapter.dump_command }
+    assert_match(/must use mysql/, error.message)
   end
 
   def test_mysql_url_password_falls_back_to_env_password

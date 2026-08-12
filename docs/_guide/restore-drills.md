@@ -56,6 +56,11 @@ This is the production-side drill:
 
 It does **not** restore into the live production database.
 
+PostgreSQL and MySQL/MariaDB scratch databases must already exist and must be dedicated to the drill. Before each
+drill, `kamal-backup` resets their existing schema objects so a reused scratch target proves an exact restore rather
+than accumulating objects from earlier runs. SQLite scratch restores replace the scratch database through SQLite's
+restore API and verify its integrity.
+
 PostgreSQL example:
 
 ```sh

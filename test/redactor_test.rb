@@ -34,6 +34,13 @@ class RedactorTest < Minitest::Test
     assert_equal 'password is [REDACTED]', redactor.redact_string('password is super-secret')
   end
 
+  def test_redacts_mysql_pwd_as_a_key_and_known_secret
+    redactor = KamalBackup::Redactor.new(env: { 'MYSQL_PWD' => 'mysql-secret-value' })
+
+    assert_equal '[REDACTED]', redactor.redact_value('MYSQL_PWD', 'mysql-secret-value')
+    assert_equal 'credential=[REDACTED]', redactor.redact_string('credential=mysql-secret-value')
+  end
+
   def test_redacts_sensitive_hash_keys
     redactor = KamalBackup::Redactor.new(env: {})
 

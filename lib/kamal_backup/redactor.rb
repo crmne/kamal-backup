@@ -2,8 +2,8 @@
 
 module KamalBackup
   class Redactor
-    SECRET_KEY_PATTERN = /(pass|password|secret|token|key|credential|authorization)/i
-    SENSITIVE_KEY_PATTERN = /(?:pass|password|secret|token|key|credential|authorization)|\A(?:user|username|pguser|.*_user|.*_username)\z/i
+    SECRET_KEY_PATTERN = /(?:pass|password|secret|token|key|credential|authorization)|(?:\A|_)pwd(?:\z|_)/i
+    SENSITIVE_KEY_PATTERN = /(?:pass|password|secret|token|key|credential|authorization)|(?:\A|_)pwd(?:\z|_)|\A(?:user|username|pguser|.*_user|.*_username)\z/i
     REDACTED = '[REDACTED]'
 
     def initialize(secret_values: [], env: ENV)

@@ -32,12 +32,12 @@ module KamalBackup
       end
 
       def restore_to_current(restic, snapshot, filename)
-        restic.write_dump_to_path(snapshot, filename, sqlite_source)
+        restore_database(restic, snapshot, filename, target: sqlite_source)
       end
 
       def restore_to_scratch(restic, snapshot, filename, target:)
         validate_scratch_restore_target(target)
-        restic.write_dump_to_path(snapshot, filename, target)
+        restore_database(restic, snapshot, filename, target: target)
       end
 
       def dump_command
@@ -66,6 +66,31 @@ module KamalBackup
 
       def sqlite_literal(value)
         "'#{value.to_s.gsub("'", "''")}'"
+      end
+
+      def restore_database(restic, snapshot, filename, target:)
+        Tempfile.create(['kamal-backup-restore-', '.sqlite3']) do |tempfile|
+          tempfile.close
+          restic.write_dump_to_path(snapshot, filename, tempfile.path)
+          validate_database_file(tempfile.path)
+          FileUtils.mkdir_p(File.dirname(File.expand_path(target)))
+          Command.capture(
+            CommandSpec.new(argv: ['sqlite3', '-bail', target, ".restore #{sqlite_literal(tempfile.path)}"]),
+            redactor: redactor
+          )
+          validate_database_file(target)
+        end
+      end
+
+      def validate_database_file(path)
+        result = Command.capture(
+          CommandSpec.new(argv: ['sqlite3', '-bail', path, 'PRAGMA quick_check;']),
+          redactor: redactor,
+          log_output: false
+        )
+        return if result.stdout.strip == 'ok'
+
+        raise ConfigurationError, "SQLite integrity check failed for #{path}"
       end
     end
   end

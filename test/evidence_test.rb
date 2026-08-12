@@ -69,6 +69,7 @@ class EvidenceTest < Minitest::Test
       assert_equal 'evidence', evidence.fetch(:kind)
       assert_nil evidence.fetch(:last_restore_drill)
       assert_nil evidence.fetch(:last_restic_check)
+      assert evidence.fetch(:tool_versions).key?(:rclone)
     end
   end
 

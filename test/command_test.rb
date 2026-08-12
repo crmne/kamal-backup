@@ -9,19 +9,22 @@ class CommandTest < Minitest::Test
       argv: ['pg_dump', 'postgres://app:secret@db/app'],
       env: {
         'PGPASSWORD' => 'secret',
+        'MYSQL_PWD' => 'mysql-secret',
         'RESTIC_REST_USERNAME' => 'backup',
         'RESTIC_CHECK_AFTER_BACKUP' => 'true'
       }
     )
-    redactor = KamalBackup::Redactor.new(env: { 'PGPASSWORD' => 'secret' })
+    redactor = KamalBackup::Redactor.new(env: { 'PGPASSWORD' => 'secret', 'MYSQL_PWD' => 'mysql-secret' })
 
     display = spec.display(redactor)
 
     assert_includes display, 'RESTIC_CHECK_AFTER_BACKUP=true'
     assert_includes display, 'PGPASSWORD=[REDACTED]'
+    assert_includes display, 'MYSQL_PWD=[REDACTED]'
     assert_includes display, 'RESTIC_REST_USERNAME=[REDACTED]'
     assert_includes display, 'postgres://[REDACTED]@db/app'
     refute_includes display, 'secret'
+    refute_includes display, 'mysql-secret'
     refute_includes display, 'backup'
   end
 

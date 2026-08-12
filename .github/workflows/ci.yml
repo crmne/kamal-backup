@@ -13,7 +13,19 @@ permissions:
   id-token: write
 
 jobs:
+  rubocop:
+    name: RuboCop
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: "3.3"
+          bundler-cache: true
+      - run: bundle exec rubocop --parallel
+
   test:
+    name: Tests
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -34,9 +46,47 @@ jobs:
           files: ./coverage/coverage.xml
           fail_ci_if_error: false
 
+  database_tests:
+    name: Database tests (${{ matrix.name }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: PostgreSQL
+            artifact: postgres
+            cases: postgres-14 postgres-15 postgres-16 postgres-17 postgres-18
+          - name: MySQL
+            artifact: mysql
+            cases: mysql-8-0 mysql-8-4
+          - name: MariaDB
+            artifact: mariadb
+            cases: mariadb-10-11 mariadb-11-4 mariadb-11-8
+          - name: SQLite + rclone
+            artifact: sqlite-rclone
+            cases: rclone-sqlite
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build the accessory image
+        run: docker build --build-arg TARGETARCH=amd64 --tag kamal-backup:integration .
+      - name: Test database backup and exact restore compatibility
+        run: test/integration/database_matrix.sh
+        env:
+          KAMAL_BACKUP_DATABASE_CASES: ${{ matrix.cases }}
+          KAMAL_BACKUP_LOG_DIR: tmp/database-test-logs
+      - name: Upload database logs on failure
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: database-logs-${{ matrix.artifact }}-attempt${{ github.run_attempt }}
+          path: tmp/database-test-logs
+          if-no-files-found: ignore
+          retention-days: 30
+
   release_gate:
     runs-on: ubuntu-latest
-    needs: test
+    needs: [rubocop, test, database_tests]
     outputs:
       publish_artifacts: ${{ steps.check_release.outputs.publish_artifacts }}
       should_release: ${{ steps.check_release.outputs.should_release }}
