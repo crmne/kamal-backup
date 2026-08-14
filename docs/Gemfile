@@ -3,8 +3,6 @@
 source 'https://rubygems.org'
 
 gem 'jekyll', '~> 4.4'
-gem 'jekyll-ai-visible-content'
 gem 'jekyll-redirect-from', '~> 0.16'
-gem 'jekyll-sitemap', '~> 1.4'
 gem 'jekyll-vitepress-theme'
 gem 'webrick', '~> 1.8'

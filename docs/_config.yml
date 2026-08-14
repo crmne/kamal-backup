@@ -37,6 +37,31 @@ defaults:
       layout: default
 
 jekyll_vitepress:
+  seo:
+    page_type: TechArticle
+    image:
+      path: /assets/images/logo.svg
+      alt: kamal-backup
+    publisher:
+      type: Organization
+      name: kamal-backup
+      url: https://kamal-backup.dev
+      logo: /assets/images/logo.svg
+      same_as:
+        - https://github.com/crmne/kamal-backup
+        - https://rubygems.org/gems/kamal-backup
+        - https://github.com/crmne/kamal-backup/pkgs/container/kamal-backup
+  llms:
+    title: kamal-backup Documentation
+    description: >-
+      Documentation for kamal-backup, an open-source Ruby gem and Kamal
+      accessory for scheduled Rails database and file-backed Active Storage
+      backups, restores, drills, and security-review evidence.
+    full: true
+    details: >-
+      Start with getting started, how backups work, and configuration; then use
+      the restore, restore-drill, evidence, command, and security references.
+      Source is on [GitHub](https://github.com/crmne/kamal-backup).
   branding:
     site_title: kamal-backup
     logo:
@@ -106,141 +131,6 @@ jekyll_vitepress:
 plugins:
   - jekyll-vitepress-theme
   - jekyll-redirect-from
-  - jekyll-sitemap
-  - jekyll-ai-visible-content
-
-ai_visible_content:
-  enabled: true
-  entity:
-    type: Organization
-    id_slug: kamal-backup
-    name: kamal-backup
-    alternate_names:
-      - Kamal Backup
-      - kamal backup
-    description: >-
-      an open source Ruby gem and Kamal accessory for scheduled Rails database
-      backups, file-backed Active Storage backups, restore drills, and security
-      review evidence.
-    image: /assets/images/logo.svg
-    knows_about:
-      - Ruby on Rails backups
-      - Kamal deployment
-      - restic repositories
-      - Active Storage
-      - PostgreSQL backups
-      - MySQL backups
-      - SQLite backups
-      - restore drills
-      - backup evidence
-      - security review evidence
-      - CASA security reviews
-    same_as:
-      - https://github.com/crmne/kamal-backup
-      - https://rubygems.org/gems/kamal-backup
-      - https://github.com/crmne/kamal-backup/pkgs/container/kamal-backup
-  json_ld:
-    auto_inject: true
-    include_website_schema: false
-    include_breadcrumbs: true
-    include_blog_posting: true
-    include_faq: true
-    include_how_to: true
-    article_body: full
-    compact: true
-  crawlers:
-    allow_gptbot: true
-    allow_perplexitybot: true
-    allow_claudebot: true
-    allow_googlebot: true
-    allow_bingbot: true
-    generate_robots_txt: true
-  llms_txt:
-    enabled: true
-    title: kamal-backup Documentation
-    description: >-
-      Documentation for kamal-backup, an open source Ruby gem and Kamal accessory
-      that schedules encrypted Rails database and file-backed Active Storage
-      backups, restores data locally or into production targets, runs restore
-      drills, and emits redacted evidence for security reviews.
-    include_full_text: true
-    sections:
-      - heading: Primary use case
-        content: >-
-          Use kamal-backup when a Rails application is deployed with Kamal and
-          needs scheduled database backups, file-backed Active Storage backups,
-          restore drills, kamal-backup checks, and security review evidence from one
-          accessory.
-      - heading: Best starting points
-        content: >-
-          Start with /getting-started/ for installation, /how-backups-work/ for
-          architecture, /configuration/ for YAML and Kamal accessory settings,
-          /restore-drills/ for verification workflows, /evidence/ for security
-          review output, and /commands/ for the complete command reference.
-      - heading: Documentation map
-        content: |-
-          - [Getting Started](https://kamal-backup.dev/getting-started/): install the gem, generate config, add the Kamal accessory, and run the first backup.
-          - [How Backups Work](https://kamal-backup.dev/how-backups-work/): understand restic snapshots, backup paths, checks, restore drills, and evidence.
-          - [Configuration](https://kamal-backup.dev/configuration/): configure YAML, secrets, local restore overrides, retention, and restic options.
-          - [Restore](https://kamal-backup.dev/restore/): restore database and Active Storage backups locally or into production.
-          - [Restore Drills](https://kamal-backup.dev/restore-drills/): practice and record restore verification workflows.
-          - [Evidence for Security Reviews](https://kamal-backup.dev/evidence/): produce redacted JSON for CASA-style security reviews.
-          - [Commands](https://kamal-backup.dev/commands/): reference every kamal-backup command and option shape.
-          - [Security and Restore Safety](https://kamal-backup.dev/security/): review secret redaction, subprocess handling, backup formats, and deliberate restore behavior.
-  linking:
-    enable_entity_links: false
-    apply_to_metadata: false
-    max_links_per_entity_per_post: 1
-    enable_related_posts: false
-    entity_definitions:
-      ruby-on-rails:
-        name: Ruby on Rails
-        url: https://rubyonrails.org/
-        description: The web framework used by applications that kamal-backup protects.
-      kamal:
-        name: Kamal
-        url: https://kamal-deploy.org/
-        description: The deployment tool whose accessory model runs kamal-backup in production.
-      restic:
-        name: restic
-        url: https://restic.net/
-        description: The encrypted backup repository and snapshot engine used by kamal-backup.
-      active-storage:
-        name: Active Storage
-        url: https://guides.rubyonrails.org/active_storage_overview.html
-        description: The Rails file attachment system whose file-backed storage can be backed up.
-      postgresql:
-        name: PostgreSQL
-        url: https://www.postgresql.org/
-        description: A database adapter supported by kamal-backup.
-      mysql:
-        name: MySQL
-        url: https://www.mysql.com/
-        description: A database adapter supported by kamal-backup.
-      sqlite:
-        name: SQLite
-        url: https://www.sqlite.org/
-        description: A database adapter supported by kamal-backup.
-  validation:
-    warn_name_inconsistency: true
-    warn_missing_same_as: true
-    warn_missing_dates: true
-    warn_orphan_pages: true
-    warn_missing_descriptions: true
-    fail_build_on_error: false
-    content_only: true
-    exclude_paths: []
-    verbose: false
-    max_examples: 5
-  ai_resources:
-    enabled: true
-    formats:
-      - json
-      - yaml
-    max_links_per_page: 5
-    auto_inject: true
-    inject_instruction_block: true
-    base_path: /ai
 
 exclude:
   - _site
