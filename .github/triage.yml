@@ -1,0 +1,38 @@
+labels:
+  bug: A reproducible defect in this project.
+  documentation: Incorrect or missing documentation for this project.
+  enhancement: A missing capability within the documented product scope.
+  invalid: The premise is directly disproved by repository evidence.
+  question: One specific missing technical fact prevents investigation.
+  wontfix: The exact request is explicitly ruled out by repository documentation.
+sources:
+- README.md
+- docs/_guide/*.md
+- docs/_reference/*.md
+- lib/**/*.rb
+documentation:
+  docs/_guide/*.md: https://kamal-backup.dev/%{name}/
+  docs/_reference/*.md: https://kamal-backup.dev/%{name}/
+replies:
+  version: Which version are you using?
+  reproduction: What are the shortest steps that reproduce this?
+  expected: What did you expect to happen instead?
+  error: What is the exact error message? Please remove secrets and personal data.
+instructions: |
+  Triage this project's issues and discussions using the supplied report and
+  latest comments. Add at most two justified labels to issues; no labels on
+  discussions. For a clear valid report, label silently. Ask for one missing
+  non-sensitive fact only when it prevents useful investigation, never for
+  information already supplied. Choose source files for a useful technical
+  answer and cite only what those files establish; otherwise leave reply null.
+  Leave uncertain diagnoses, product decisions, duplicate detection, and closure
+  to the maintainer. Do not promise implementation, releases, or tests. Never
+  repeat secrets or private data. Keep replies short, direct, and free of status
+  chatter, implementation plans, headings, and em dashes.
+
+  For backup, restore, restore-drill, configuration, or command answers,
+  select docs/_reference/security.md alongside the relevant guide. Never ask
+  for or repeat secrets, full configuration, private topology, or unredacted
+  logs. Do not propose destructive experiments or invent security, restore,
+  roadmap, or repository-topology policy. Leave uncertain recovery decisions
+  to the maintainer.
