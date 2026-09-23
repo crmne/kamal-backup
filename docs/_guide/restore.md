@@ -25,6 +25,18 @@ If `pg_restore` reports ignored errors, the restore fails loudly rather than exi
 
 That distinction is strict. `local` means your machine. `production` means the production-side accessory context.
 
+## Choosing a snapshot
+
+Every restore and drill takes `latest` or a snapshot ID from `kamal-backup list`. Each backup writes one snapshot per
+database and one for the configured paths, so pass any one of them: `kamal-backup` restores the other databases and
+files from that same backup. If that backup is missing a piece, for example because its file backup failed, the
+restore stops before changing anything.
+
+```sh
+bundle exec kamal-backup -d production list
+bundle exec kamal-backup -d production restore local 5a541473
+```
+
 ## `restore local`
 
 This is the fast way to pull a production backup down into local development.

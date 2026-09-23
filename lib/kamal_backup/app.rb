@@ -532,8 +532,67 @@ module KamalBackup
 
         snapshot['short_id'] || snapshot['id']
       else
-        argument
+        resolve_explicit_snapshot(argument, tags: tags)
       end
+    end
+
+    # Each backup run writes one snapshot per database and then one file
+    # snapshot, each with its own ID. An explicit ID names one of them, so the
+    # other types come from the same run.
+    def resolve_explicit_snapshot(argument, tags:)
+      anchor = find_snapshot(argument)
+      snapshot = backup_run_for(anchor).find { |candidate| snapshot_tagged?(candidate, tags) }
+
+      unless snapshot
+        raise ConfigurationError,
+              "the backup containing snapshot #{argument} has no snapshot for #{tags.join(', ')}"
+      end
+
+      snapshot['short_id'] || snapshot['id']
+    end
+
+    def find_snapshot(argument)
+      matches = backup_snapshots.select do |snapshot|
+        snapshot['short_id'] == argument || snapshot['id'].to_s.start_with?(argument)
+      end
+
+      raise ConfigurationError, "no restic snapshot found for #{argument}" if matches.empty?
+      raise ConfigurationError, "snapshot ID #{argument} is ambiguous; use a longer ID" if matches.size > 1
+
+      matches.first
+    end
+
+    # Snapshots from one host, in time order, split into backup runs. A run
+    # ends after its file snapshot (always written last) or when a database
+    # snapshot group repeats, so a run that failed partway stays on its own.
+    def backup_run_for(anchor)
+      host_snapshots = backup_snapshots.select { |snapshot| snapshot['hostname'] == anchor['hostname'] }
+      runs = host_snapshots.sort_by { |snapshot| Time.parse(snapshot.fetch('time')) }.each_with_object([]) do |snapshot, grouped|
+        current = grouped.last
+        if current.nil? || current.any? { |other| run_boundary?(other, snapshot) }
+          grouped << [snapshot]
+        else
+          current << snapshot
+        end
+      end
+
+      runs.find { |run| run.include?(anchor) }
+    end
+
+    def run_boundary?(earlier, later)
+      snapshot_tagged?(earlier, ['type:files']) || snapshot_group(earlier) == snapshot_group(later)
+    end
+
+    def snapshot_group(snapshot)
+      Array(snapshot['tags']).select { |tag| tag.start_with?('type:', 'database:', 'adapter:') }.sort
+    end
+
+    def snapshot_tagged?(snapshot, tags)
+      (tags - Array(snapshot['tags'])).empty?
+    end
+
+    def backup_snapshots
+      @backup_snapshots ||= restic.snapshots_json
     end
   end
 end

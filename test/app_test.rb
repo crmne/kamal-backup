@@ -46,7 +46,11 @@ class AppTest < Minitest::Test
       KamalBackup::CommandResult.new(stdout: "unlocked\n", stderr: '', status: 0)
     end
 
-    attr_writer :database_snapshot, :files_snapshot, :snapshot_time
+    attr_writer :database_snapshot, :files_snapshot, :snapshot_list, :snapshot_time
+
+    def snapshots_json
+      @snapshot_list || []
+    end
 
     def latest_snapshot(tags:)
       @latest_snapshot_calls << tags
@@ -873,6 +877,103 @@ class AppTest < Minitest::Test
     end
   end
 
+  def test_restore_to_production_with_a_file_snapshot_id_restores_the_database_from_the_same_backup
+    Dir.mktmpdir do |dir|
+      db = File.join(dir, 'app_production.sqlite3')
+      files = File.join(dir, 'storage')
+      File.write(db, '')
+      FileUtils.mkdir_p(files)
+
+      restic = FakeRestic.new
+      restic.snapshot_list = two_backup_runs
+      restic.stage_file('files-1', File.join(files, 'hello.txt'), 'older backup')
+      database = FakeDatabase.new(adapter_name: 'sqlite', current_target_identifier: db)
+      app = KamalBackup::App.new(
+        env: base_env('DATABASE_ADAPTER' => 'sqlite', 'SQLITE_DATABASE_PATH' => db, 'BACKUP_PATHS' => files),
+        restic: restic,
+        database: database
+      )
+
+      result = app.restore_to_production('files-1')
+
+      assert_equal 'files-1', result.fetch(:files).fetch(:snapshot)
+      assert_equal 'database-1', database.current_restore_calls.first.fetch(:snapshot)
+      assert_equal 'older backup', File.read(File.join(files, 'hello.txt'))
+      assert_empty restic.latest_snapshot_calls
+    end
+  end
+
+  def test_drill_on_production_with_a_database_snapshot_id_restores_files_from_the_same_backup
+    Dir.mktmpdir do |dir|
+      restic = FakeRestic.new
+      restic.snapshot_list = two_backup_runs
+      database = FakeDatabase.new(adapter_name: 'postgres')
+      app = KamalBackup::App.new(
+        env: base_env(
+          'DATABASE_ADAPTER' => 'postgres',
+          'DATABASE_URL' => 'postgres://app@db/app_production',
+          'KAMAL_BACKUP_STATE_DIR' => File.join(dir, 'state')
+        ),
+        restic: restic,
+        database: database
+      )
+
+      result = app.drill_on_production('database-1', database_name: 'app_restore',
+                                                     file_target: File.join(dir, 'restored-files'))
+
+      assert_equal 'ok', result.fetch(:status)
+      assert_equal 'files-1', result.fetch(:files).fetch(:snapshot)
+      assert_equal 'pg-database-1', database.scratch_restore_calls.first.fetch(:snapshot)
+    end
+  end
+
+  def test_restore_with_a_database_snapshot_id_rejects_a_backup_without_a_file_snapshot
+    Dir.mktmpdir do |dir|
+      db = File.join(dir, 'app_production.sqlite3')
+      files = File.join(dir, 'storage')
+      File.write(db, '')
+      FileUtils.mkdir_p(files)
+
+      restic = FakeRestic.new
+      # The first run's file backup failed, so its database snapshot stands alone.
+      restic.snapshot_list = two_backup_runs.reject { |snapshot| snapshot['short_id'] == 'files-1' }
+      database = FakeDatabase.new(adapter_name: 'sqlite', current_target_identifier: db)
+      app = KamalBackup::App.new(
+        env: base_env('DATABASE_ADAPTER' => 'sqlite', 'SQLITE_DATABASE_PATH' => db, 'BACKUP_PATHS' => files),
+        restic: restic,
+        database: database
+      )
+
+      error = assert_raises(KamalBackup::ConfigurationError) do
+        app.restore_to_production('database-1')
+      end
+
+      assert_includes error.message, 'the backup containing snapshot database-1 has no snapshot for type:files'
+      assert_empty database.current_restore_calls
+    end
+  end
+
+  def test_restore_rejects_an_unknown_snapshot_id
+    Dir.mktmpdir do |dir|
+      db = File.join(dir, 'app_production.sqlite3')
+      File.write(db, '')
+
+      restic = FakeRestic.new
+      restic.snapshot_list = two_backup_runs
+      app = KamalBackup::App.new(
+        env: base_env('DATABASE_ADAPTER' => 'sqlite', 'SQLITE_DATABASE_PATH' => db, 'BACKUP_PATHS' => ''),
+        restic: restic,
+        database: FakeDatabase.new(adapter_name: 'sqlite', current_target_identifier: db)
+      )
+
+      error = assert_raises(KamalBackup::ConfigurationError) do
+        app.restore_to_production('deadbeef')
+      end
+
+      assert_includes error.message, 'no restic snapshot found for deadbeef'
+    end
+  end
+
   def test_drill_on_production_restores_scratch_targets_and_records_success
     Dir.mktmpdir do |dir|
       target = File.join(dir, 'restored-files')
@@ -974,6 +1075,24 @@ class AppTest < Minitest::Test
       end
 
       assert_includes error.message, 'restic is required on PATH'
+    end
+  end
+
+  private
+
+  def two_backup_runs
+    database_tags = ['kamal-backup', 'app:demo', 'type:database', 'database:app', 'adapter:sqlite']
+    database_tags_pg = database_tags[0..3] + ['adapter:postgres']
+    files_tags = ['kamal-backup', 'app:demo', 'type:files', 'path:storage']
+    [
+      ['database-1', database_tags, '2026-09-20T02:00:00Z'],
+      ['pg-database-1', database_tags_pg, '2026-09-20T02:00:01Z'],
+      ['files-1', files_tags, '2026-09-20T02:00:05Z'],
+      ['database-2', database_tags, '2026-09-21T02:00:00Z'],
+      ['pg-database-2', database_tags_pg, '2026-09-21T02:00:01Z'],
+      ['files-2', files_tags, '2026-09-21T02:00:05Z']
+    ].map do |short_id, tags, time|
+      { 'id' => "#{short_id}-full", 'short_id' => short_id, 'hostname' => 'demo-backup', 'tags' => tags, 'time' => time }
     end
   end
 end

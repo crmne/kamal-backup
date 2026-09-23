@@ -92,6 +92,42 @@ class IntegrationSqliteResticTest < Minitest::Test
     end
   end
 
+  def test_restore_local_from_an_older_file_snapshot_id_restores_the_matching_database
+    skip 'set KAMAL_BACKUP_RUN_INTEGRATION=1 to run restic integration tests' unless ENV['KAMAL_BACKUP_RUN_INTEGRATION'] == '1'
+    skip 'sqlite3 is required' unless system('which', 'sqlite3', out: File::NULL)
+    skip 'restic is required' unless system('which', 'restic', out: File::NULL)
+
+    Dir.mktmpdir do |dir|
+      db = File.join(dir, 'app_development.sqlite3')
+      files = File.join(dir, 'storage')
+      FileUtils.mkdir_p(files)
+      File.write(File.join(files, 'hello.txt'), 'first files')
+      system('sqlite3', db, "CREATE TABLE items (name text); INSERT INTO items VALUES ('first');", exception: true)
+
+      env = base_env(
+        'APP_NAME' => 'integration',
+        'DATABASE_ADAPTER' => 'sqlite',
+        'SQLITE_DATABASE_PATH' => db,
+        'BACKUP_PATHS' => files,
+        'RESTIC_REPOSITORY' => File.join(dir, 'repo'),
+        'RESTIC_PASSWORD' => 'integration-secret',
+        'RESTIC_INIT_IF_MISSING' => 'true',
+        'KAMAL_BACKUP_STATE_DIR' => File.join(dir, 'state')
+      )
+
+      first_files_snapshot = KamalBackup::App.new(env: env).backup(force: true).fetch(:files).fetch(:snapshot)
+
+      system('sqlite3', db, "UPDATE items SET name = 'second';", exception: true)
+      File.write(File.join(files, 'hello.txt'), 'second files')
+      KamalBackup::App.new(env: env).backup(force: true)
+
+      KamalBackup::App.new(env: env).restore_to_local_machine(first_files_snapshot)
+
+      assert_equal 'first', `sqlite3 #{db} "select name from items"`.strip
+      assert_equal 'first files', File.read(File.join(files, 'hello.txt'))
+    end
+  end
+
   def test_current_sqlite_restore_fails_safely_while_a_writer_holds_the_database
     skip 'set KAMAL_BACKUP_RUN_INTEGRATION=1 to run restic integration tests' unless ENV['KAMAL_BACKUP_RUN_INTEGRATION'] == '1'
     skip 'sqlite3 is required' unless system('which', 'sqlite3', out: File::NULL)
