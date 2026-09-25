@@ -63,9 +63,7 @@ releases and match their style:
 - Write about what changed for the user, not the commit history. Describe
   known limitations honestly.
 
-Commit the notes as `packaging/release-notes/vX.Y.Z.md`, or in the
-repository's existing release-notes location, before tagging, and have the
-release workflow publish that file as the release description (for example
-softprops/action-gh-release with `body_path` and
-`generate_release_notes: false`). Never leave GitHub's generated notes in
+Generate `release-notes.md` before publishing, and have the release workflow
+publish that file as the release description (for example `gh release create`
+with `--notes-file release-notes.md`). Never leave GitHub's generated notes in
 place. After publishing, verify every media and download link.
