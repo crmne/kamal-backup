@@ -63,7 +63,8 @@ releases and match their style:
 - Write about what changed for the user, not the commit history. Describe
   known limitations honestly.
 
-Generate `release-notes.md` before publishing, and have the release workflow
-publish that file as the release description (for example `gh release create`
-with `--notes-file release-notes.md`). Never leave GitHub's generated notes in
+Generate a temporary `release-notes.md` from the commits being released before
+publishing, and have the release workflow publish that file as the release
+description (for example `gh release create` with
+`--notes-file release-notes.md`). Never leave GitHub's generated notes in
 place. After publishing, verify every media and download link.
