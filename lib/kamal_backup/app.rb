@@ -593,15 +593,19 @@ module KamalBackup
     end
 
     def select_database(database_name)
+      names = databases.map { |adapter| database_config_name(adapter) }
+
       unless database_name.to_s.strip.empty?
         return databases.find { |adapter| database_config_name(adapter) == database_name } ||
-               raise(ConfigurationError, "database #{database_name.inspect} is not configured")
+               raise(
+                 ConfigurationError,
+                 "database #{database_name.inspect} is not configured; configured names: #{names.join(', ')}"
+               )
       end
 
       return databases.first if databases.one?
 
-      names = databases.map { |adapter| database_config_name(adapter) }.join(', ')
-      raise ConfigurationError, "multiple databases configured (#{names}); pass --database NAME"
+      raise ConfigurationError, "multiple databases configured (#{names.join(', ')}); pass --database NAME"
     end
 
     def resolve_snapshot(argument, tags:)

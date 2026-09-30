@@ -185,7 +185,7 @@ module KamalBackup
     method_option :output, aliases: '-o', type: :string,
                            desc: 'Write the dump to this path (required; parent directory must exist)'
     method_option :database, type: :string,
-                             desc: 'Database name when multiple databases are configured'
+                             desc: 'Name from config/kamal-backup.yml when multiple databases are configured'
     method_option :yes, aliases: '-y', type: :boolean, default: false,
                         desc: 'Overwrite an existing output file without prompting'
     desc 'dump [SNAPSHOT]', 'Download a database dump to a file (not file or Active Storage backups)'

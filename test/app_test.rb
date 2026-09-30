@@ -1422,7 +1422,7 @@ class AppTest < Minitest::Test
         app.dump_database(snapshot: 'latest', database_name: 'missing', output_path: File.join(dir, 'out.sqlite3'))
       end
 
-      assert_includes error.message, 'database "missing" is not configured'
+      assert_includes error.message, 'database "missing" is not configured; configured names: app'
     end
   end
 
