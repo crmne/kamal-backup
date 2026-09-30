@@ -17,13 +17,14 @@ bundle exec kamal-backup -c config/deploy.staging.yml -d staging check
 bundle exec kamal-backup restore local latest
 ```
 
-From an app checkout with the default `config/deploy.yml`, `backup`, `list`, `check`, `unlock`, `evidence`, `validate`, and `version` infer the backup accessory and shell out through Kamal. Use `-d` and `-c` when you need an explicit Kamal destination or config file. Local commands run on your machine.
+From an app checkout with the default `config/deploy.yml`, `backup`, `list`, `dump`, `check`, `unlock`, `evidence`, `validate`, and `version` infer the backup accessory and shell out through Kamal. Use `-d` and `-c` when you need an explicit Kamal destination or config file. Local commands run on your machine.
 
 The command surface is:
 
 ```sh
 kamal-backup init
 kamal-backup backup
+kamal-backup dump [snapshot-or-latest] -o PATH
 kamal-backup restore local [snapshot-or-latest]
 kamal-backup restore production [snapshot-or-latest]
 kamal-backup drill local [snapshot-or-latest]
@@ -41,6 +42,7 @@ kamal-backup version
 Use `kamal-backup help` for the command list. Use command `--help` for task-specific options:
 
 ```sh
+kamal-backup dump --help
 kamal-backup restore local --help
 kamal-backup drill production --help
 ```
@@ -51,6 +53,7 @@ kamal-backup drill production --help
 |---|---|
 | `init` | Create `config/kamal-backup.yml` with the normal YAML-first shape, then print an accessory snippet to add to `config/deploy.yml`. It does not edit `config/deploy.yml` or create `config/kamal-backup.local.yml`. Create the local file to configure local file restore targets or override other Rails local defaults. |
 | `backup` | Run a backup when `backup.schedule` is due, or report when the latest backup is still current. Use `--force` to create an immediate snapshot anyway. From an app checkout with `config/deploy.yml`, or with `-d`/`-c`, it runs on production infrastructure through Kamal. Remote execution requires the local gem and accessory versions to match. |
+| `dump [snapshot-or-latest] -o PATH` | Download one database dump from a restic snapshot to a local file. This does not include file or Active Storage backups; use `restore` for those. `-o`/`--output` is required, must name a file (not a directory), and the parent directory must already exist. An existing file is left in place unless you confirm or pass `--yes`. A mismatched extension warns but still writes the dump. Pass `--database NAME` when more than one database is configured. Snapshot selection matches restore: `latest` is the newest database snapshot for that database, and an explicit ID from `list` resolves to the database dump from the same backup run. From an app checkout with `config/deploy.yml`, or with `-d`/`-c`, it streams the dump from the backup accessory using that accessory's repository and Kamal's SSH settings. |
 | `restore local [snapshot-or-latest]` | Restore onto your machine: current local database plus explicitly configured local file paths. Prompts before overwriting local data. With `-d` or `-c`, the source-side defaults come from `config/kamal-backup.yml`. |
 | `restore production [snapshot-or-latest]` | Restore back into the live production database and production Active Storage path from `config/kamal-backup.yml`. Requires typed confirmation before overwriting production data. With `-d` or `-c`, it shells out through Kamal and requires matching local/remote versions. |
 | `drill local [snapshot-or-latest]` | Restore onto your machine, optionally run `--check`, print JSON, and store the latest drill record under `KAMAL_BACKUP_STATE_DIR`. With `-d` or `-c`, the source-side defaults come from `config/kamal-backup.yml`. |

@@ -182,6 +182,29 @@ module KamalBackup
       end
     end
 
+    method_option :output, aliases: '-o', type: :string,
+                           desc: 'Write the dump to this path (required; parent directory must exist)'
+    method_option :database, type: :string,
+                             desc: 'Database name when multiple databases are configured'
+    method_option :yes, aliases: '-y', type: :boolean, default: false,
+                        desc: 'Overwrite an existing output file without prompting'
+    desc 'dump [SNAPSHOT]', 'Download a database dump to a file (not file or Active Storage backups)'
+    def dump(snapshot = 'latest')
+      output_path = require_dump_output_path!(options[:output])
+      confirm_dump_overwrite!(output_path)
+
+      if remote_command_mode?
+        dump_remote(snapshot, output_path: output_path)
+      else
+        result = direct_app.dump_database(
+          snapshot: snapshot,
+          database_name: options[:database],
+          output_path: output_path
+        )
+        warn("wrote #{result[:filename]} from snapshot #{result[:snapshot]} to #{result[:output]}")
+      end
+    end
+
     desc 'check', 'Run restic check and record the latest result'
     def check
       if remote_command_mode?

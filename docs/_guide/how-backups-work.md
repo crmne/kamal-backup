@@ -69,6 +69,7 @@ For SQLite apps that store the database under the same mounted volume as Active 
 - `drill local`: Run a local restore plus an optional verification command, then record the result as JSON.
 - `drill production`: Restore into a scratch database and scratch Active Storage path on production infrastructure, run an optional verification command, and record the result as JSON.
 - `list`: Show restic snapshots for this app so you can see recent runs and snapshot IDs.
+- `dump`: Download one database dump from a restic snapshot to a local file with `-o PATH`. File and Active Storage snapshots stay on `restore`. Use this when you want the raw database dump without running a full restore.
 - `check`: Verify the restic repository and store the latest result in `KAMAL_BACKUP_STATE_DIR`, which defaults to `/var/lib/kamal-backup`.
 - `unlock`: Clear stale restic repository locks.
 - `prune`: Apply the configured retention policy and remove unneeded restic data.

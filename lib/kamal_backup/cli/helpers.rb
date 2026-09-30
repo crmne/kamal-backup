@@ -111,6 +111,97 @@ module KamalBackup
         result
       end
 
+      def require_dump_output_path!(output_path)
+        path = output_path.to_s.strip
+        raise ConfigurationError, 'output path is required; pass -o PATH' if path.empty?
+        if path.end_with?('/', '\\')
+          raise ConfigurationError, 'output path must be a file, not a directory'
+        end
+
+        expanded = File.expand_path(path)
+        if File.directory?(expanded)
+          raise ConfigurationError, "output path must be a file, not a directory: #{expanded}"
+        end
+
+        parent = File.dirname(expanded)
+        unless File.directory?(parent)
+          raise ConfigurationError, "output path directory does not exist: #{parent}"
+        end
+
+        expanded
+      end
+
+      def warn_dump_extension!(output_path, expected_extension)
+        expected = ".#{expected_extension}"
+        actual = File.extname(output_path.to_s)
+        return if actual.casecmp?(expected)
+
+        actual_label = actual.empty? ? 'no extension' : actual.inspect
+        warn("warning: output path has #{actual_label}; expected #{expected.inspect} for this database dump")
+      end
+
+      def confirm_dump_overwrite!(output_path)
+        return unless File.exist?(output_path)
+
+        confirm!("Overwrite #{output_path}? This will replace the existing file.")
+      end
+
+      def dump_remote(snapshot, output_path:)
+        config = remote_dump_config
+        repository = config.restic_repository ||
+                     raise(ConfigurationError, 'RESTIC_REPOSITORY is required to dump from the backup accessory')
+        located = remote_dump_app(config, repository).locate_database_dump(
+          snapshot: snapshot,
+          database_name: options[:database],
+          validate_credentials: false
+        )
+        filename = located.fetch(:filename)
+        expanded = require_dump_output_path!(output_path)
+        warn_dump_extension!(expanded, located.fetch(:dump_extension))
+        temp_path = "#{expanded}.kamal-backup-#{Process.pid}.tmp"
+
+        begin
+          File.open(temp_path, 'wb') do |file|
+            bridge.stream_restic_dump(
+              accessory_name: accessory_name,
+              repository: repository,
+              snapshot: located.fetch(:snapshot),
+              filename: filename,
+              io: file
+            )
+          end
+          File.rename(temp_path, expanded)
+          warn("wrote #{filename.sub(%r{\A/+}, '')} from snapshot #{located.fetch(:snapshot)} to #{expanded}")
+        ensure
+          FileUtils.rm_f(temp_path)
+        end
+      end
+
+      def remote_dump_config
+        Config.new(
+          env: bridge.accessory_environment(accessory_name: accessory_name),
+          config_paths: [Config::SHARED_CONFIG_PATH],
+          load_project_defaults: false
+        )
+      end
+
+      def remote_dump_app(config, repository)
+        runner = lambda do |args, **|
+          stdout = bridge.capture_restic_command(
+            accessory_name: accessory_name,
+            repository: repository,
+            argv: args
+          )
+          CommandResult.new(stdout: stdout, stderr: '', status: 0)
+        end
+
+        App.new(
+          config: config,
+          redactor: redactor,
+          restic: Restic.new(config, redactor: redactor, runner: runner)
+        )
+      end
+
       def ensure_remote_version_match!
         return if remote_version == VERSION
 
