@@ -1367,6 +1367,65 @@ class AppTest < Minitest::Test
     end
   end
 
+  def test_dump_database_requires_a_name_when_several_databases_are_configured
+    Dir.mktmpdir do |dir|
+      config_dir = File.join(dir, 'config')
+      FileUtils.mkdir_p(config_dir)
+      File.write(
+        File.join(config_dir, 'kamal-backup.yml'),
+        <<~YAML
+          app: multi
+          databases:
+            - name: app
+              adapter: postgres
+              url: postgres://multi@postgres:5432/multi_production
+            - name: queue
+              adapter: postgres
+              url: postgres://multi@postgres:5432/multi_queue_production
+          restic:
+            repository: /tmp/restic-repo
+            password: restic-secret
+        YAML
+      )
+
+      app = KamalBackup::App.new(
+        config: KamalBackup::Config.new(env: {}, cwd: dir),
+        restic: FakeRestic.new
+      )
+
+      error = assert_raises(KamalBackup::ConfigurationError) do
+        app.dump_database(snapshot: 'latest', output_path: File.join(dir, 'out.pgdump'))
+      end
+
+      assert_includes error.message, 'multiple databases configured (app, queue)'
+    end
+  end
+
+  def test_dump_database_rejects_an_unknown_database_name
+    Dir.mktmpdir do |dir|
+      db = File.join(dir, 'app.sqlite3')
+      files = File.join(dir, 'storage')
+      File.write(db, '')
+      FileUtils.mkdir_p(files)
+
+      app = KamalBackup::App.new(
+        env: base_env(
+          'DATABASE_ADAPTER' => 'sqlite',
+          'SQLITE_DATABASE_PATH' => db,
+          'BACKUP_PATHS' => files
+        ),
+        restic: FakeRestic.new,
+        database: FakeDatabase.new(adapter_name: 'sqlite')
+      )
+
+      error = assert_raises(KamalBackup::ConfigurationError) do
+        app.dump_database(snapshot: 'latest', database_name: 'missing', output_path: File.join(dir, 'out.sqlite3'))
+      end
+
+      assert_includes error.message, 'database "missing" is not configured'
+    end
+  end
+
   private
 
   def two_backup_runs

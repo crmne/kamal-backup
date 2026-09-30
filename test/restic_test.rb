@@ -637,6 +637,45 @@ class ResticTest < Minitest::Test
     end
   end
 
+  def test_pipe_dump_to_io_writes_the_dump
+    with_fake_restic("#!/bin/sh\nprintf dump-bytes\n") do
+      io = StringIO.new
+
+      assert plumbing_restic.pipe_dump_to_io('snap', 'database.dump', io)
+
+      assert_equal 'dump-bytes', io.string
+    end
+  end
+
+  def test_pipe_dump_to_io_raises_when_restic_fails
+    with_fake_restic("#!/bin/sh\necho dump-broke >&2\nexit 1\n") do
+      error = assert_raises(KamalBackup::CommandError) do
+        plumbing_restic.pipe_dump_to_io('snap', 'database.dump', StringIO.new)
+      end
+
+      assert_equal 1, error.status
+    end
+  end
+
+  def test_pipe_dump_to_io_reports_a_missing_restic_binary
+    Dir.mktmpdir do |dir|
+      empty_bin = File.join(dir, 'empty-bin')
+      FileUtils.mkdir_p(empty_bin)
+      previous_path = ENV.fetch('PATH')
+      ENV['PATH'] = empty_bin
+      begin
+        error = assert_raises(KamalBackup::CommandError) do
+          plumbing_restic.pipe_dump_to_io('snap', 'database.dump', StringIO.new)
+        end
+
+        assert_equal 127, error.status
+        assert_includes error.message, 'command not found: restic'
+      ensure
+        ENV['PATH'] = previous_path
+      end
+    end
+  end
+
   def test_write_dump_to_path_reports_a_missing_restic_binary
     Dir.mktmpdir do |dir|
       empty_bin = File.join(dir, 'empty-bin')

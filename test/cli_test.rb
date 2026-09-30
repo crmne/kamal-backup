@@ -1079,6 +1079,21 @@ class CLITest < Minitest::Test
     assert_includes err, 'output path directory does not exist'
   end
 
+  def test_dump_rejects_a_trailing_slash_output_path
+    _, err = capture_io do
+      error = assert_raises(SystemExit) do
+        Dir.mktmpdir do |dir|
+          Dir.chdir(dir) do
+            KamalBackup::CLI.start(['dump', 'latest', '-o', "#{dir}/"], env: base_env)
+          end
+        end
+      end
+      assert_equal 1, error.status
+    end
+
+    assert_includes err, 'output path must be a file, not a directory'
+  end
+
   def test_dump_rejects_a_directory_output_path
     _, err = capture_io do
       error = assert_raises(SystemExit) do

@@ -731,6 +731,76 @@ class KamalBridgeTest < Minitest::Test
     end
   end
 
+  def test_raise_restic_accessory_error_reports_other_command_failures
+    bridge = KamalBackup::KamalBridge.new(redactor: KamalBackup::Redactor.new(env: {}))
+    spec = KamalBackup::CommandSpec.new(argv: %w[ssh example.com restic])
+
+    error = assert_raises(KamalBackup::CommandError) do
+      bridge.send(
+        :raise_restic_accessory_error,
+        spec,
+        1,
+        'permission denied',
+        snapshot: 'abc',
+        filename: '/databases/demo/app/postgres.pgdump'
+      )
+    end
+
+    assert_includes error.message, 'command failed (1)'
+    assert_includes error.message, 'permission denied'
+  end
+
+  def test_ssh_proxy_args_cover_jump_hosts_and_proxy_commands
+    bridge = KamalBackup::KamalBridge.new(redactor: KamalBackup::Redactor.new(env: {}))
+    jump = Struct.new(:jump_proxies).new('bastion')
+    command = Struct.new(:command_line_template).new('ssh -W %h:%p user@proxy')
+
+    assert_equal ['-J', 'root@bastion'], bridge.send(:ssh_proxy_args, jump)
+    assert_equal ['-J', 'root@host'], bridge.send(:ssh_proxy_args, 'host')
+    assert_equal ['-o', 'ProxyCommand=ssh -W %h:%p user@proxy'], bridge.send(:ssh_proxy_args, command)
+    assert_equal ['-o', 'ProxyCommand=ssh -W %h:%p user@proxy'], bridge.send(:ssh_proxy_args, 'ssh -W %h:%p user@proxy')
+    assert_equal ['-o', 'ProxyCommand=ssh -W %h:%p jump'], bridge.send(:ssh_proxy_args, { 'command' => 'ssh -W %h:%p jump' })
+    assert_equal [], bridge.send(:ssh_proxy_args, '   ')
+    assert_equal [], bridge.send(:ssh_proxy_args, { 'command' => '' })
+  end
+
+  def test_ssh_argv_enables_agent_forwarding_and_multiple_config_files
+    Dir.mktmpdir do |dir|
+      first = File.join(dir, 'first')
+      second = File.join(dir, 'second')
+      File.write(first, "User one\n")
+      File.write(second, "User two\n")
+      bridge = KamalBackup::KamalBridge.new(redactor: KamalBackup::Redactor.new(env: {}), cwd: dir)
+      bridge.instance_variable_set(
+        :@config,
+        { 'ssh_options' => { 'forward_agent' => true, 'config' => [first, second] } }
+      )
+
+      config_file = bridge.send(:ssh_config_file)
+      argv = bridge.send(:ssh_argv, 'example.com', 'true', identity_files: [], config_file: config_file.path)
+
+      assert_includes argv, 'ForwardAgent=yes'
+      assert_includes File.read(config_file.path), first
+      assert_includes File.read(config_file.path), second
+    ensure
+      config_file&.close!
+    end
+  end
+
+  def test_ssh_identity_cleanup_ignores_close_errors
+    bridge = KamalBackup::KamalBridge.new(redactor: KamalBackup::Redactor.new(env: {}))
+    bridge.instance_variable_set(:@config, { 'ssh_options' => { 'key_data' => ['secret-key'] } })
+    file = Tempfile.new('kamal-backup-ssh-test')
+    file.define_singleton_method(:close!) { raise StandardError, 'busy' }
+
+    Tempfile.stub(:new, file) do
+      bridge.send(:with_ssh_identity_files) { |_paths, _config| nil }
+    end
+  ensure
+    file&.close
+    file&.unlink
+  end
+
   def test_stream_restic_dump_defaults_to_kamal_ssh_user_and_port
     Dir.mktmpdir do |outer|
       args_file = File.join(outer, 'ssh-args')
