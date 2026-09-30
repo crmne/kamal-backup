@@ -105,8 +105,10 @@ class KamalBridgeTest < Minitest::Test
 
     KamalBackup::Command.define_singleton_method(:capture) do |spec, **kwargs|
       calls << { spec: spec, kwargs: kwargs }
-      kwargs.fetch(:tee_stdout).print("kamal stdout\n")
-      kwargs.fetch(:tee_stderr).print("kamal stderr\n")
+      if kwargs[:tee_stdout]
+        kwargs.fetch(:tee_stdout).print("kamal stdout\n")
+        kwargs.fetch(:tee_stderr).print("kamal stderr\n")
+      end
       KamalBackup::CommandResult.new(stdout: "kamal stdout\n", stderr: "kamal stderr\n", status: 0, streamed: true)
     end
 
@@ -122,15 +124,17 @@ class KamalBridgeTest < Minitest::Test
         bridge.execute_on_accessory(accessory_name: 'backup', command: 'kamal-backup backup --force', stream: true)
       end
 
+      exec_call = calls.find { |call| call.fetch(:spec).argv.include?('exec') }
+
       assert result.streamed
       assert_equal "kamal stdout\n", out.string
       assert_equal "kamal stderr\n", err.string
       assert_equal ['kamal', 'accessory', 'exec', '--reuse', 'backup', 'kamal-backup', 'backup', '--force'],
-                   calls.first.fetch(:spec).argv
-      assert_equal false, calls.first.fetch(:kwargs).fetch(:log)
-      assert_equal false, calls.first.fetch(:kwargs).fetch(:log_output)
-      assert_same out, calls.first.fetch(:kwargs).fetch(:tee_stdout)
-      assert_same err, calls.first.fetch(:kwargs).fetch(:tee_stderr)
+                   exec_call.fetch(:spec).argv
+      assert_equal false, exec_call.fetch(:kwargs).fetch(:log)
+      assert_equal false, exec_call.fetch(:kwargs).fetch(:log_output)
+      assert_same out, exec_call.fetch(:kwargs).fetch(:tee_stdout)
+      assert_same err, exec_call.fetch(:kwargs).fetch(:tee_stderr)
     end
   ensure
     KamalBackup::Command.define_singleton_method(:capture) { |*args, **kwargs, &block| original.call(*args, **kwargs, &block) }
@@ -182,8 +186,10 @@ class KamalBridgeTest < Minitest::Test
 
       bridge.execute_on_accessory(accessory_name: 'backup', command: 'kamal-backup list', stream: true)
 
-      assert_equal '1', calls.first.fetch(:spec).env.fetch('SSHKIT_COLOR')
-      assert_equal false, calls.first.fetch(:kwargs).fetch(:log)
+      exec_call = calls.find { |call| call.fetch(:spec).argv.include?('exec') }
+
+      assert_equal '1', exec_call.fetch(:spec).env.fetch('SSHKIT_COLOR')
+      assert_equal false, exec_call.fetch(:kwargs).fetch(:log)
     end
   ensure
     KamalBackup::Command.define_singleton_method(:capture) { |*args, **kwargs, &block| original.call(*args, **kwargs, &block) }
@@ -562,6 +568,291 @@ class KamalBridgeTest < Minitest::Test
 
     with_kamal_config(config_yaml) do |bridge|
       assert_empty bridge.accessory_environment(accessory_name: 'backup')
+    end
+  end
+
+  def test_raise_restic_accessory_error_reports_a_missing_snapshot
+    bridge = KamalBackup::KamalBridge.new(redactor: KamalBackup::Redactor.new(env: {}))
+    spec = KamalBackup::CommandSpec.new(argv: %w[ssh example.com restic])
+
+    error = assert_raises(KamalBackup::CommandError) do
+      bridge.send(
+        :raise_restic_accessory_error,
+        spec,
+        1,
+        'Fatal: failed to find snapshot: no matching ID found for prefix "does-not-exist"',
+        snapshot: 'does-not-exist',
+        filename: '/databases/demo/app/postgres.pgdump'
+      )
+    end
+
+    assert_equal 'backup not found for snapshot "does-not-exist"', error.message
+    assert_equal 1, error.status
+  end
+
+  def test_raise_restic_accessory_error_reports_a_missing_backup_file
+    bridge = KamalBackup::KamalBridge.new(redactor: KamalBackup::Redactor.new(env: {}))
+    spec = KamalBackup::CommandSpec.new(argv: %w[ssh example.com restic])
+
+    error = assert_raises(KamalBackup::CommandError) do
+      bridge.send(
+        :raise_restic_accessory_error,
+        spec,
+        1,
+        'path /databases/demo/app/postgres.pgdump not found in the repository',
+        snapshot: 'latest',
+        filename: '/databases/demo/app/postgres.pgdump'
+      )
+    end
+
+    assert_equal(
+      'backup file "/databases/demo/app/postgres.pgdump" not found in snapshot "latest"',
+      error.message
+    )
+  end
+
+  def test_capture_restic_command_returns_stdout
+    with_fake_ssh("#!/bin/sh\nshift\nprintf '[{\"id\":\"abc\"}]'\n") do
+      Dir.mktmpdir do |dir|
+        bridge = KamalBackup::KamalBridge.new(redactor: KamalBackup::Redactor.new(env: {}), cwd: dir)
+        bridge.instance_variable_set(
+          :@config,
+          {
+            'service' => 'demo',
+            'accessories' => {
+              'backup' => {
+                'host' => 'example.com',
+                'service' => 'demo-backup'
+              }
+            }
+          }
+        )
+
+        output = bridge.capture_restic_command(
+          accessory_name: 'backup',
+          repository: '/var/lib/restic-repo',
+          argv: ['snapshots', '--json']
+        )
+
+        assert_equal '[{"id":"abc"}]', output
+      end
+    end
+  end
+
+  def test_stream_restic_dump_requires_a_live_accessory
+    Dir.mktmpdir do |dir|
+      bridge = KamalBackup::KamalBridge.new(redactor: KamalBackup::Redactor.new(env: {}), cwd: dir)
+      bridge.define_singleton_method(:config) { { 'accessories' => {} } }
+
+      error = assert_raises(KamalBackup::ConfigurationError) do
+        bridge.stream_restic_dump(
+          accessory_name: 'backup',
+          repository: '/var/lib/restic-repo',
+          snapshot: 'latest',
+          filename: '/databases/demo/app/postgres.pgdump',
+          io: StringIO.new
+        )
+      end
+
+      assert_includes error.message, 'could not find a live backup accessory "backup"'
+    end
+  end
+
+  def test_stream_restic_dump_uses_kamal_ssh_user_port_proxy_and_key
+    args_file = nil
+    Dir.mktmpdir do |outer|
+      args_file = File.join(outer, 'ssh-args')
+      key_path = File.join(outer, 'id_ed25519')
+      File.write(key_path, 'key-file')
+      config_path = File.join(outer, 'ssh_config')
+      File.write(config_path, "User from-file\n")
+
+      with_fake_ssh(<<~SCRIPT) do
+        #!/bin/sh
+        printf '%s\\n' "$@" > #{args_file}
+        prev=
+        identity=
+        config=
+        for arg in "$@"; do
+          if [ "$prev" = "-i" ]; then identity=$arg; fi
+          if [ "$prev" = "-F" ]; then config=$arg; fi
+          prev=$arg
+        done
+        grep -q 'BEGIN OPENSSH PRIVATE KEY' "$identity" || exit 1
+        grep -q '#{config_path}' "$config" || exit 1
+        printf dump-bytes
+      SCRIPT
+        Dir.mktmpdir do |dir|
+          bridge = KamalBackup::KamalBridge.new(redactor: KamalBackup::Redactor.new(env: {}), cwd: dir)
+          bridge.instance_variable_set(
+            :@config,
+            {
+              'service' => 'demo',
+              'ssh_options' => {
+                'user' => 'app',
+                'port' => 2222,
+                'proxy' => { 'jump_proxies' => 'root@bastion' },
+                'keys' => [key_path],
+                'keys_only' => true,
+                'config' => config_path,
+                'forward_agent' => false,
+                'key_data' => ["-----BEGIN OPENSSH PRIVATE KEY-----\nsecret\n"]
+              },
+              'accessories' => {
+                'backup' => {
+                  'host' => 'example.com',
+                  'service' => 'demo-backup'
+                }
+              }
+            }
+          )
+
+          bridge.stream_restic_dump(
+            accessory_name: 'backup',
+            repository: '/var/lib/restic-repo',
+            snapshot: 'latest',
+            filename: '/databases/demo/app/postgres.pgdump',
+            io: StringIO.new
+          )
+        end
+      end
+
+      args = File.read(args_file).split("\n")
+      assert_equal '2222', args[args.index('-p') + 1]
+      assert_equal 'app', args[args.index('-l') + 1]
+      assert_equal 'root@bastion', args[args.index('-J') + 1]
+      assert_equal key_path, args[args.index('-i') + 1]
+      refute_equal key_path, args[args.rindex('-i') + 1]
+      refute_includes args.join("\n"), 'BEGIN OPENSSH PRIVATE KEY'
+      assert_includes args, 'IdentitiesOnly=yes'
+      assert_includes args, 'ForwardAgent=no'
+      assert_includes args, '-F'
+      assert_equal 'example.com', args[-2]
+    end
+  end
+
+  def test_stream_restic_dump_defaults_to_kamal_ssh_user_and_port
+    Dir.mktmpdir do |outer|
+      args_file = File.join(outer, 'ssh-args')
+      with_fake_ssh(<<~SCRIPT) do
+        #!/bin/sh
+        printf '%s\\n' "$@" > #{args_file}
+        printf dump-bytes
+      SCRIPT
+        Dir.mktmpdir do |dir|
+          bridge = KamalBackup::KamalBridge.new(redactor: KamalBackup::Redactor.new(env: {}), cwd: dir)
+          bridge.instance_variable_set(
+            :@config,
+            {
+              'service' => 'demo',
+              'accessories' => {
+                'backup' => {
+                  'host' => 'example.com',
+                  'service' => 'demo-backup'
+                }
+              }
+            }
+          )
+
+          bridge.stream_restic_dump(
+            accessory_name: 'backup',
+            repository: '/var/lib/restic-repo',
+            snapshot: 'latest',
+            filename: '/databases/demo/app/postgres.pgdump',
+            io: StringIO.new
+          )
+        end
+      end
+
+      args = File.read(args_file).split("\n")
+      assert_equal '22', args[args.index('-p') + 1]
+      assert_equal 'root', args[args.index('-l') + 1]
+    end
+  end
+
+  def test_stream_restic_dump_streams_binary_output_over_ssh
+    with_fake_ssh("#!/bin/sh\nshift\nprintf dump-bytes\n") do
+      Dir.mktmpdir do |dir|
+        bridge = KamalBackup::KamalBridge.new(redactor: KamalBackup::Redactor.new(env: {}), cwd: dir)
+        bridge.instance_variable_set(
+          :@config,
+          {
+            'service' => 'demo',
+            'accessories' => {
+              'backup' => {
+                'host' => 'example.com',
+                'service' => 'demo-backup'
+              }
+            }
+          }
+        )
+        io = StringIO.new
+
+        result = bridge.stream_restic_dump(
+          accessory_name: 'backup',
+          repository: '/var/lib/restic-repo',
+          snapshot: 'latest',
+          filename: '/databases/demo/app/postgres.pgdump',
+          io: io
+        )
+
+        assert_equal true, result
+        assert_equal 'dump-bytes', io.string
+      end
+    end
+  end
+
+  def test_stream_restic_dump_maps_missing_snapshot_errors
+    with_fake_ssh(<<~SCRIPT) do
+      #!/bin/sh
+      shift
+      echo 'Fatal: failed to find snapshot: no matching ID found for prefix "does-not-exist"' >&2
+      exit 1
+    SCRIPT
+      Dir.mktmpdir do |dir|
+        bridge = KamalBackup::KamalBridge.new(redactor: KamalBackup::Redactor.new(env: {}), cwd: dir)
+        bridge.instance_variable_set(
+          :@config,
+          {
+            'service' => 'demo',
+            'accessories' => {
+              'backup' => {
+                'host' => 'example.com',
+                'service' => 'demo-backup'
+              }
+            }
+          }
+        )
+
+        error = assert_raises(KamalBackup::CommandError) do
+          bridge.stream_restic_dump(
+            accessory_name: 'backup',
+            repository: '/var/lib/restic-repo',
+            snapshot: 'does-not-exist',
+            filename: '/databases/demo/app/postgres.pgdump',
+            io: StringIO.new
+          )
+        end
+
+        assert_equal 'backup not found for snapshot "does-not-exist"', error.message
+      end
+    end
+  end
+
+  def with_fake_ssh(script)
+    Dir.mktmpdir do |dir|
+      bin_dir = File.join(dir, 'bin')
+      FileUtils.mkdir_p(bin_dir)
+      fake_ssh = File.join(bin_dir, 'ssh')
+      File.write(fake_ssh, script)
+      FileUtils.chmod('+x', fake_ssh)
+      previous_path = ENV.fetch('PATH')
+      ENV['PATH'] = "#{bin_dir}#{File::PATH_SEPARATOR}#{previous_path}"
+      begin
+        yield
+      ensure
+        ENV['PATH'] = previous_path
+      end
     end
   end
 end

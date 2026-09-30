@@ -1,6 +1,8 @@
 # frozen_string_literal: true
 
+require 'open3'
 require 'shellwords'
+require 'tempfile'
 require 'yaml'
 require_relative 'command'
 require_relative 'yaml_access'
@@ -84,6 +86,32 @@ module KamalBackup
       end
     end
 
+    # Run restic on the live accessory over SSH + docker exec without Kamal's
+    # log wrapper. Kamal accessory exec mixes INFO lines into stdout.
+    def capture_restic_command(accessory_name:, repository:, argv:)
+      stdout = +''
+      run_restic_on_accessory(accessory_name: accessory_name, repository: repository, argv: argv) do |stream|
+        stdout << stream.read
+      end
+      stdout
+    end
+
+    # Stream a restic dump over SSH + docker exec without Kamal's log wrapper.
+    # Kamal accessory exec mixes INFO lines into stdout, which corrupts binary dumps.
+    def stream_restic_dump(accessory_name:, repository:, snapshot:, filename:, io:)
+      run_restic_on_accessory(
+        accessory_name: accessory_name,
+        repository: repository,
+        argv: ['dump', snapshot.to_s, filename.to_s],
+        snapshot: snapshot,
+        filename: filename
+      ) do |stdout|
+        IO.copy_stream(stdout, io)
+      end
+
+      true
+    end
+
     def remote_version(accessory_name:)
       result = execute_on_accessory(accessory_name: accessory_name, command: %w[kamal-backup version])
       version = parse_version_line(result.stdout)
@@ -94,6 +122,187 @@ module KamalBackup
     end
 
     private
+
+    def run_restic_on_accessory(accessory_name:, repository:, argv:, snapshot: nil, filename: nil)
+      config
+      target = live_accessory_target(accessory_name)
+      unless target
+        raise ConfigurationError,
+              "could not find a live backup accessory #{accessory_name.inspect} to dump from"
+      end
+
+      remote = [
+        'docker', 'exec',
+        '-e', "RESTIC_REPOSITORY=#{repository}",
+        target.fetch(:service_name),
+        'restic', *Array(argv).map(&:to_s)
+      ].shelljoin
+
+      with_ssh_identity_files do |identity_files, config_file|
+        spec = CommandSpec.new(
+          argv: ssh_argv(target.fetch(:host), remote, identity_files: identity_files, config_file: config_file)
+        )
+        Open3.popen3(*spec.argv) do |stdin, stdout, stderr, wait_thread|
+          stdin.close
+          err_reader = Thread.new { stderr.read }
+          yield stdout
+          err = err_reader.value
+          status = wait_thread.value
+          unless status.success?
+            raise_restic_accessory_error(
+              spec,
+              status.exitstatus,
+              err,
+              snapshot: snapshot || argv[1],
+              filename: filename || argv[2]
+            )
+          end
+        end
+      end
+    end
+
+    def raise_restic_accessory_error(spec, status, stderr, snapshot:, filename:)
+      redacted = @redactor.redact_string(stderr.to_s)
+      message =
+        if stderr.to_s.match?(/no matching ID found|failed to find snapshot|no snapshot found/i)
+          "backup not found for snapshot #{snapshot.inspect}"
+        elsif filename && stderr.to_s.match?(/path .+ not found|does not exist|no such file/i)
+          "backup file #{filename.inspect} not found in snapshot #{snapshot.inspect}"
+        else
+          "command failed (#{status}): #{spec.display(@redactor)}\n#{redacted}"
+        end
+
+      raise CommandError.new(
+        message,
+        command: spec,
+        status: status,
+        stderr: redacted
+      )
+    end
+
+    # Match Kamal's SSH defaults: user root, port 22, plus ssh.user, port, proxy,
+    # keys, and config from the rendered deploy config.
+    def ssh_argv(host, remote_command, identity_files:, config_file:)
+      options = ssh_options
+      argv = ['ssh', '-p', options.fetch(:port), '-l', options.fetch(:user)]
+      argv.concat(ssh_proxy_args(options[:proxy]))
+      Array(options[:keys]).each { |key| argv.concat(['-i', key]) }
+      identity_files.each { |path| argv.concat(['-i', path]) }
+      argv.concat(['-o', 'IdentitiesOnly=yes']) if options[:keys_only]
+      argv.concat(['-F', '/dev/null']) if options[:config] == false
+      argv.concat(['-F', config_file]) if config_file
+      case options[:forward_agent]
+      when true
+        argv.concat(['-o', 'ForwardAgent=yes'])
+      when false
+        argv.concat(['-o', 'ForwardAgent=no'])
+      end
+      argv << host
+      argv << remote_command
+      argv
+    end
+
+    def ssh_options
+      raw = fetch(config, :ssh_options) || {}
+      {
+        user: (ssh_config_value(raw, :user) || 'root').to_s,
+        port: (ssh_config_value(raw, :port) || 22).to_s,
+        proxy: ssh_config_value(raw, :proxy),
+        keys: Array(ssh_config_value(raw, :keys)).map { |key| File.expand_path(key.to_s) },
+        keys_only: ssh_config_value(raw, :keys_only),
+        config: ssh_config_value(raw, :config),
+        forward_agent: ssh_config_value(raw, :forward_agent),
+        key_data: Array(ssh_config_value(raw, :key_data)).map(&:to_s).reject(&:empty?)
+      }
+    end
+
+    def ssh_config_value(raw, key)
+      [key, key.to_s, key.to_sym].each do |candidate|
+        return raw[candidate] if raw.key?(candidate)
+      end
+      nil
+    end
+
+    def ssh_proxy_args(proxy)
+      return [] if proxy.nil? || proxy == false
+
+      if (jump = ssh_jump_target(proxy))
+        jump = "root@#{jump}" unless jump.include?('@') || jump.include?(',')
+        return ['-J', jump]
+      end
+
+      command = ssh_proxy_command(proxy)
+      return [] if command.nil? || command.empty?
+
+      ['-o', "ProxyCommand=#{command}"]
+    end
+
+    def ssh_jump_target(proxy)
+      raw = if proxy.is_a?(String)
+              proxy
+            elsif proxy.respond_to?(:jump_proxies)
+              proxy.jump_proxies
+            elsif proxy.is_a?(Hash)
+              fetch(proxy, :jump_proxies)
+            end
+      value = raw.to_s.strip
+      return if value.empty? || value.include?(' ')
+
+      value
+    end
+
+    def ssh_proxy_command(proxy)
+      raw = if proxy.is_a?(String)
+              proxy
+            elsif proxy.respond_to?(:command_line_template) && !proxy.respond_to?(:jump_proxies)
+              proxy.command_line_template
+            elsif proxy.is_a?(Hash)
+              fetch(proxy, :command_line_template) || fetch(proxy, :command)
+            end
+      value = raw.to_s.strip
+      return if value.empty? || !value.include?(' ')
+
+      value
+    end
+
+    def with_ssh_identity_files
+      identity_files = []
+      config_file = ssh_config_file
+      ssh_options.fetch(:key_data).each do |data|
+        file = Tempfile.new(['kamal-backup-ssh-', '.key'])
+        file.chmod(0o600)
+        file.write(data)
+        file.close
+        identity_files << file
+      end
+      yield identity_files.map(&:path), config_file&.path
+    ensure
+      (Array(identity_files) + [config_file]).compact.each do |file|
+        file.close! if file.respond_to?(:close!)
+      rescue StandardError
+        nil
+      end
+    end
+
+    def ssh_config_file
+      paths = case ssh_options[:config]
+              when String
+                [ssh_options[:config]]
+              when Array
+                ssh_options[:config].map(&:to_s)
+              else
+                []
+              end
+      paths = paths.map { |path| File.expand_path(path) }.reject(&:empty?)
+      return if paths.empty?
+
+      file = Tempfile.new(['kamal-backup-ssh-config-', '.conf'])
+      file.chmod(0o600)
+      file.write(paths.map { |path| %(Include "#{path.gsub(/["\\]/) { |char| "\\#{char}" }}") }.join("\n"))
+      file.write("\n")
+      file.close
+      file
+    end
 
     def config
       @config ||= begin
@@ -296,8 +505,6 @@ module KamalBackup
     end
 
     def live_accessory_target(accessory_name)
-      return unless defined?(@config)
-
       accessory_config = accessory(accessory_name)
       host = single_accessory_host(accessory_config)
       service_name = fetch(accessory_config, :service) || default_accessory_service_name(accessory_name)
