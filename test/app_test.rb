@@ -1137,7 +1137,7 @@ class AppTest < Minitest::Test
   end
 
   def test_locate_database_dump_skips_credential_validation_when_requested
-    Dir.mktmpdir do |dir|
+    Dir.mktmpdir do
       restic = FakeRestic.new
       restic.database_file_path = '/databases/test-app/app/postgres.pgdump'
 

@@ -148,19 +148,13 @@ module KamalBackup
     def require_dump_output_path!(output_path)
       path = output_path.to_s.strip
       raise ConfigurationError, 'output path is required; pass -o PATH' if path.empty?
-      if path.end_with?('/', '\\')
-        raise ConfigurationError, 'output path must be a file, not a directory'
-      end
+      raise ConfigurationError, 'output path must be a file, not a directory' if path.end_with?('/', '\\')
 
       expanded = File.expand_path(path)
-      if File.directory?(expanded)
-        raise ConfigurationError, "output path must be a file, not a directory: #{expanded}"
-      end
+      raise ConfigurationError, "output path must be a file, not a directory: #{expanded}" if File.directory?(expanded)
 
       parent = File.dirname(expanded)
-      unless File.directory?(parent)
-        raise ConfigurationError, "output path directory does not exist: #{parent}"
-      end
+      raise ConfigurationError, "output path directory does not exist: #{parent}" unless File.directory?(parent)
 
       expanded
     end
@@ -599,17 +593,15 @@ module KamalBackup
     end
 
     def select_database(database_name)
-      if database_name.to_s.strip.empty?
-        if databases.one?
-          databases.first
-        else
-          names = databases.map { |adapter| database_config_name(adapter) }.join(', ')
-          raise ConfigurationError, "multiple databases configured (#{names}); pass --database NAME"
-        end
-      else
-        databases.find { |adapter| database_config_name(adapter) == database_name } ||
-          raise(ConfigurationError, "database #{database_name.inspect} is not configured")
+      unless database_name.to_s.strip.empty?
+        return databases.find { |adapter| database_config_name(adapter) == database_name } ||
+               raise(ConfigurationError, "database #{database_name.inspect} is not configured")
       end
+
+      return databases.first if databases.one?
+
+      names = databases.map { |adapter| database_config_name(adapter) }.join(', ')
+      raise ConfigurationError, "multiple databases configured (#{names}); pass --database NAME"
     end
 
     def resolve_snapshot(argument, tags:)

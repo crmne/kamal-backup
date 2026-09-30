@@ -1024,7 +1024,7 @@ class CLITest < Minitest::Test
       when 'snapshots'
         snapshots.to_json
       when 'ls'
-        [{ 'type' => 'file', 'path' => filename }].map(&:to_json).join("\n") + "\n"
+        "#{[{ 'type' => 'file', 'path' => filename }].map(&:to_json).join("\n")}\n"
       else
         raise "unexpected restic argv: #{argv.inspect}"
       end
@@ -1051,7 +1051,7 @@ class CLITest < Minitest::Test
       error = assert_raises(SystemExit) do
         Dir.mktmpdir do |dir|
           Dir.chdir(dir) do
-            KamalBackup::CLI.start(['dump', 'latest'], env: base_env)
+            KamalBackup::CLI.start(%w[dump latest], env: base_env)
           end
         end
       end

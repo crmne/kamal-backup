@@ -114,19 +114,13 @@ module KamalBackup
       def require_dump_output_path!(output_path)
         path = output_path.to_s.strip
         raise ConfigurationError, 'output path is required; pass -o PATH' if path.empty?
-        if path.end_with?('/', '\\')
-          raise ConfigurationError, 'output path must be a file, not a directory'
-        end
+        raise ConfigurationError, 'output path must be a file, not a directory' if path.end_with?('/', '\\')
 
         expanded = File.expand_path(path)
-        if File.directory?(expanded)
-          raise ConfigurationError, "output path must be a file, not a directory: #{expanded}"
-        end
+        raise ConfigurationError, "output path must be a file, not a directory: #{expanded}" if File.directory?(expanded)
 
         parent = File.dirname(expanded)
-        unless File.directory?(parent)
-          raise ConfigurationError, "output path directory does not exist: #{parent}"
-        end
+        raise ConfigurationError, "output path directory does not exist: #{parent}" unless File.directory?(parent)
 
         expanded
       end

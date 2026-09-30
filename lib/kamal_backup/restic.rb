@@ -177,14 +177,11 @@ module KamalBackup
     def write_dump_to_path(snapshot, filename, target_path)
       command = CommandSpec.new(argv: ['restic', 'dump', snapshot, filename], env: restic_env)
       target_path = File.expand_path(target_path)
-      if File.directory?(target_path)
-        raise ConfigurationError, "output path must be a file, not a directory: #{target_path}"
-      end
+      raise ConfigurationError, "output path must be a file, not a directory: #{target_path}" if File.directory?(target_path)
 
       parent = File.dirname(target_path)
-      unless File.directory?(parent)
-        raise ConfigurationError, "output path directory does not exist: #{parent}"
-      end
+      raise ConfigurationError, "output path directory does not exist: #{parent}" unless File.directory?(parent)
+
       temp_path = "#{target_path}.kamal-backup-#{Process.pid}.tmp"
 
       output = Command.output
