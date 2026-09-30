@@ -589,6 +589,7 @@ class ResticTest < Minitest::Test
   def test_write_dump_to_path_writes_the_dump_atomically
     with_fake_restic("#!/bin/sh\nprintf dump-bytes\n") do |dir|
       target = File.join(dir, 'restore', 'database.dump')
+      FileUtils.mkdir_p(File.dirname(target))
 
       written = plumbing_restic.write_dump_to_path('snap', 'database.dump', target)
 
@@ -598,9 +599,33 @@ class ResticTest < Minitest::Test
     end
   end
 
+  def test_write_dump_to_path_requires_the_output_directory_to_exist
+    with_fake_restic("#!/bin/sh\nprintf dump-bytes\n") do |dir|
+      target = File.join(dir, 'missing', 'database.dump')
+
+      error = assert_raises(KamalBackup::ConfigurationError) do
+        plumbing_restic.write_dump_to_path('snap', 'database.dump', target)
+      end
+
+      assert_includes error.message, 'output path directory does not exist'
+      refute_path_exists target
+    end
+  end
+
+  def test_write_dump_to_path_rejects_a_directory_target
+    with_fake_restic("#!/bin/sh\nprintf dump-bytes\n") do |dir|
+      error = assert_raises(KamalBackup::ConfigurationError) do
+        plumbing_restic.write_dump_to_path('snap', 'database.dump', dir)
+      end
+
+      assert_includes error.message, 'output path must be a file, not a directory'
+    end
+  end
+
   def test_write_dump_to_path_cleans_up_the_temp_file_when_restic_fails
     with_fake_restic("#!/bin/sh\necho dump-broke >&2\nexit 1\n") do |dir|
       target = File.join(dir, 'restore', 'database.dump')
+      FileUtils.mkdir_p(File.dirname(target))
 
       error = assert_raises(KamalBackup::CommandError) do
         plumbing_restic.write_dump_to_path('snap', 'database.dump', target)

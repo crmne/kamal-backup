@@ -13,9 +13,10 @@ module KamalBackup
 
     attr_reader :config, :redactor
 
-    def initialize(config, redactor:)
+    def initialize(config, redactor:, runner: nil)
       @config = config
       @redactor = redactor
+      @runner = runner
     end
 
     def ensure_repository
@@ -176,8 +177,15 @@ module KamalBackup
     def write_dump_to_path(snapshot, filename, target_path)
       command = CommandSpec.new(argv: ['restic', 'dump', snapshot, filename], env: restic_env)
       target_path = File.expand_path(target_path)
-      FileUtils.mkdir_p(File.dirname(target_path))
-      temp_path = "#{target_path}.kamal-backup-#{$PROCESS_ID}.tmp"
+      if File.directory?(target_path)
+        raise ConfigurationError, "output path must be a file, not a directory: #{target_path}"
+      end
+
+      parent = File.dirname(target_path)
+      unless File.directory?(parent)
+        raise ConfigurationError, "output path directory does not exist: #{parent}"
+      end
+      temp_path = "#{target_path}.kamal-backup-#{Process.pid}.tmp"
 
       output = Command.output
       context = output&.command_start(command, redactor: redactor)
@@ -203,6 +211,27 @@ module KamalBackup
       raise
     end
 
+    def pipe_dump_to_io(snapshot, filename, io)
+      command = CommandSpec.new(argv: ['restic', 'dump', snapshot, filename], env: restic_env)
+      output = Command.output
+      context = output&.command_start(command, redactor: redactor)
+      Open3.popen3(command.env, *command.argv) do |stdin, stdout, stderr, wait_thread|
+        stdin.close
+        stderr_reader = Thread.new do
+          Command.collect_stream(stderr, command_output: output, context: context, stream: :stderr, redactor: redactor)
+        end
+        IO.copy_stream(stdout, io)
+        err = stderr_reader.value
+        status = wait_thread.value
+        output&.command_exit(context, status.exitstatus)
+        raise_command_error(command, status, '', err) unless status.success?
+      end
+      true
+    rescue Errno::ENOENT => e
+      raise CommandError.new("command not found: #{command.argv.first}", command: command, status: 127,
+                                                                         stderr: e.message)
+    end
+
     def restore_snapshot(snapshot, target)
       log("restoring file snapshot #{snapshot} to #{target}")
       run(['restore', snapshot, '--target', target])
@@ -211,6 +240,8 @@ module KamalBackup
     private
 
     def run(args, log_output: true, env: restic_env)
+      return @runner.call(args, log_output: log_output, env: env) if @runner
+
       Command.capture(
         CommandSpec.new(argv: ['restic'] + args, env: env),
         redactor: redactor,

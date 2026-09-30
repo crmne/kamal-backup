@@ -2,11 +2,13 @@
 
 require_relative 'test_helper'
 require 'json'
+require 'stringio'
 
 class AppTest < Minitest::Test
   class FakeRestic
     attr_reader :backup_path_calls, :check_calls, :database_file_calls, :ensure_repository_calls,
-                :latest_snapshot_calls, :prune_calls, :restore_snapshot_calls, :unlock_calls
+                :latest_snapshot_calls, :prune_calls, :restore_snapshot_calls, :unlock_calls,
+                :write_dump_calls, :pipe_dump_calls
 
     def initialize
       @backup_path_calls = []
@@ -17,10 +19,14 @@ class AppTest < Minitest::Test
       @prune_calls = 0
       @restore_snapshot_calls = []
       @unlock_calls = 0
+      @write_dump_calls = []
+      @pipe_dump_calls = []
       @database_snapshot = 'latest-database-snapshot'
       @files_snapshot = 'latest-files-snapshot'
       @snapshot_time = nil
       @staged_files = {}
+      @dump_bytes = 'dump-bytes'
+      @database_file_path = 'database.dump'
     end
 
     def ensure_repository
@@ -46,7 +52,8 @@ class AppTest < Minitest::Test
       KamalBackup::CommandResult.new(stdout: "unlocked\n", stderr: '', status: 0)
     end
 
-    attr_writer :database_snapshot, :files_snapshot, :snapshot_list, :snapshot_time
+    attr_writer :database_snapshot, :files_snapshot, :snapshot_list, :snapshot_time, :dump_bytes,
+                :database_file_path
 
     def snapshots_json
       @snapshot_list || []
@@ -65,7 +72,19 @@ class AppTest < Minitest::Test
 
     def database_file(snapshot, adapter, database_name: nil)
       @database_file_calls << { snapshot: snapshot, adapter: adapter, database_name: database_name }
-      'database.dump'
+      @database_file_path
+    end
+
+    def write_dump_to_path(snapshot, filename, target_path)
+      @write_dump_calls << { snapshot: snapshot, filename: filename, target_path: target_path }
+      File.write(target_path, @dump_bytes)
+      target_path
+    end
+
+    def pipe_dump_to_io(snapshot, filename, io)
+      @pipe_dump_calls << { snapshot: snapshot, filename: filename, io: io }
+      io.write(@dump_bytes)
+      true
     end
 
     def stage_file(snapshot, path, content)
@@ -95,6 +114,14 @@ class AppTest < Minitest::Test
       @backup_calls = []
       @current_restore_calls = []
       @scratch_restore_calls = []
+    end
+
+    def dump_extension
+      case adapter_name
+      when 'postgres' then 'pgdump'
+      when 'mysql' then 'sql'
+      else 'sqlite3'
+      end
     end
 
     def backup(restic)
@@ -1075,6 +1102,268 @@ class AppTest < Minitest::Test
       end
 
       assert_includes error.message, 'restic is required on PATH'
+    end
+  end
+
+  def test_dump_database_writes_to_the_output_path
+    Dir.mktmpdir do |dir|
+      db = File.join(dir, 'app.sqlite3')
+      files = File.join(dir, 'storage')
+      output = File.join(dir, 'out.sqlite3')
+      File.write(db, '')
+      FileUtils.mkdir_p(files)
+      restic = FakeRestic.new
+      restic.database_file_path = 'databases/test-app/app/sqlite.sqlite3'
+
+      app = KamalBackup::App.new(
+        env: base_env(
+          'DATABASE_ADAPTER' => 'sqlite',
+          'SQLITE_DATABASE_PATH' => db,
+          'BACKUP_PATHS' => files
+        ),
+        restic: restic,
+        database: FakeDatabase.new(adapter_name: 'sqlite')
+      )
+
+      result = app.dump_database(snapshot: 'latest', output_path: output)
+
+      assert_equal 'latest-database-snapshot', result.fetch(:snapshot)
+      assert_equal 'databases/test-app/app/sqlite.sqlite3', result.fetch(:filename)
+      assert_equal output, result.fetch(:output)
+      assert_equal 'dump-bytes', File.read(output)
+      assert_equal 1, restic.write_dump_calls.size
+      assert_equal 'latest-database-snapshot', restic.write_dump_calls.first.fetch(:snapshot)
+    end
+  end
+
+  def test_locate_database_dump_skips_credential_validation_when_requested
+    Dir.mktmpdir do |dir|
+      restic = FakeRestic.new
+      restic.database_file_path = '/databases/test-app/app/postgres.pgdump'
+
+      app = KamalBackup::App.new(
+        env: {
+          'APP_NAME' => 'test-app',
+          'RESTIC_REPOSITORY' => '/tmp/restic-repo',
+          'DATABASE_ADAPTER' => 'postgres',
+          'DATABASE_URL' => 'postgres://app@postgres:5432/app_production'
+        },
+        restic: restic,
+        database: FakeDatabase.new(adapter_name: 'postgres')
+      )
+
+      located = app.locate_database_dump(snapshot: 'latest', validate_credentials: false)
+
+      assert_equal 'latest-database-snapshot', located.fetch(:snapshot)
+      assert_equal '/databases/test-app/app/postgres.pgdump', located.fetch(:filename)
+      assert_equal 'pgdump', located.fetch(:dump_extension)
+    end
+  end
+
+  def test_dump_database_requires_an_output_path_or_io
+    Dir.mktmpdir do |dir|
+      db = File.join(dir, 'app.sqlite3')
+      files = File.join(dir, 'storage')
+      File.write(db, '')
+      FileUtils.mkdir_p(files)
+
+      app = KamalBackup::App.new(
+        env: base_env(
+          'DATABASE_ADAPTER' => 'sqlite',
+          'SQLITE_DATABASE_PATH' => db,
+          'BACKUP_PATHS' => files
+        ),
+        restic: FakeRestic.new,
+        database: FakeDatabase.new(adapter_name: 'sqlite')
+      )
+
+      error = assert_raises(KamalBackup::ConfigurationError) do
+        app.dump_database(snapshot: 'latest')
+      end
+
+      assert_includes error.message, 'output path is required'
+    end
+  end
+
+  def test_dump_database_requires_the_output_directory_to_exist
+    Dir.mktmpdir do |dir|
+      db = File.join(dir, 'app.sqlite3')
+      files = File.join(dir, 'storage')
+      File.write(db, '')
+      FileUtils.mkdir_p(files)
+
+      app = KamalBackup::App.new(
+        env: base_env(
+          'DATABASE_ADAPTER' => 'sqlite',
+          'SQLITE_DATABASE_PATH' => db,
+          'BACKUP_PATHS' => files
+        ),
+        restic: FakeRestic.new,
+        database: FakeDatabase.new(adapter_name: 'sqlite')
+      )
+
+      error = assert_raises(KamalBackup::ConfigurationError) do
+        app.dump_database(snapshot: 'latest', output_path: File.join(dir, 'missing', 'out.sqlite3'))
+      end
+
+      assert_includes error.message, 'output path directory does not exist'
+    end
+  end
+
+  def test_dump_database_can_write_to_an_io
+    Dir.mktmpdir do |dir|
+      db = File.join(dir, 'app.sqlite3')
+      files = File.join(dir, 'storage')
+      File.write(db, '')
+      FileUtils.mkdir_p(files)
+      restic = FakeRestic.new
+      io = StringIO.new
+
+      app = KamalBackup::App.new(
+        env: base_env(
+          'DATABASE_ADAPTER' => 'sqlite',
+          'SQLITE_DATABASE_PATH' => db,
+          'BACKUP_PATHS' => files
+        ),
+        restic: restic,
+        database: FakeDatabase.new(adapter_name: 'sqlite')
+      )
+
+      result = app.dump_database(snapshot: 'latest', io: io)
+
+      assert_equal 'io', result.fetch(:output)
+      assert_equal 'dump-bytes', io.string
+      assert_equal 1, restic.pipe_dump_calls.size
+    end
+  end
+
+  def test_dump_database_rejects_a_directory_output_path
+    Dir.mktmpdir do |dir|
+      db = File.join(dir, 'app.sqlite3')
+      files = File.join(dir, 'storage')
+      File.write(db, '')
+      FileUtils.mkdir_p(files)
+
+      app = KamalBackup::App.new(
+        env: base_env(
+          'DATABASE_ADAPTER' => 'sqlite',
+          'SQLITE_DATABASE_PATH' => db,
+          'BACKUP_PATHS' => files
+        ),
+        restic: FakeRestic.new,
+        database: FakeDatabase.new(adapter_name: 'sqlite')
+      )
+
+      error = assert_raises(KamalBackup::ConfigurationError) do
+        app.dump_database(snapshot: 'latest', output_path: dir)
+      end
+
+      assert_includes error.message, 'output path must be a file, not a directory'
+    end
+  end
+
+  def test_dump_database_rejects_a_trailing_slash_output_path
+    Dir.mktmpdir do |dir|
+      db = File.join(dir, 'app.sqlite3')
+      files = File.join(dir, 'storage')
+      File.write(db, '')
+      FileUtils.mkdir_p(files)
+
+      app = KamalBackup::App.new(
+        env: base_env(
+          'DATABASE_ADAPTER' => 'sqlite',
+          'SQLITE_DATABASE_PATH' => db,
+          'BACKUP_PATHS' => files
+        ),
+        restic: FakeRestic.new,
+        database: FakeDatabase.new(adapter_name: 'sqlite')
+      )
+
+      error = assert_raises(KamalBackup::ConfigurationError) do
+        app.dump_database(snapshot: 'latest', output_path: "#{dir}/")
+      end
+
+      assert_includes error.message, 'output path must be a file, not a directory'
+    end
+  end
+
+  def test_dump_database_warns_when_the_extension_does_not_match
+    Dir.mktmpdir do |dir|
+      db = File.join(dir, 'app.sqlite3')
+      files = File.join(dir, 'storage')
+      output = File.join(dir, 'out.sql')
+      File.write(db, '')
+      FileUtils.mkdir_p(files)
+
+      app = KamalBackup::App.new(
+        env: base_env(
+          'DATABASE_ADAPTER' => 'sqlite',
+          'SQLITE_DATABASE_PATH' => db,
+          'BACKUP_PATHS' => files
+        ),
+        restic: FakeRestic.new,
+        database: FakeDatabase.new(adapter_name: 'sqlite')
+      )
+
+      _, err = capture_io do
+        app.dump_database(snapshot: 'latest', output_path: output)
+      end
+
+      assert_path_exists output
+      assert_includes err, 'warning: output path has ".sql"; expected ".sqlite3"'
+    end
+  end
+
+  def test_dump_database_does_not_warn_for_the_expected_extension
+    Dir.mktmpdir do |dir|
+      db = File.join(dir, 'app.sqlite3')
+      files = File.join(dir, 'storage')
+      output = File.join(dir, 'out.sqlite3')
+      File.write(db, '')
+      FileUtils.mkdir_p(files)
+
+      app = KamalBackup::App.new(
+        env: base_env(
+          'DATABASE_ADAPTER' => 'sqlite',
+          'SQLITE_DATABASE_PATH' => db,
+          'BACKUP_PATHS' => files
+        ),
+        restic: FakeRestic.new,
+        database: FakeDatabase.new(adapter_name: 'sqlite')
+      )
+
+      _, err = capture_io do
+        app.dump_database(snapshot: 'latest', output_path: output)
+      end
+
+      refute_includes err, 'warning: output path has'
+    end
+  end
+
+  def test_dump_database_raises_when_the_snapshot_has_no_database_file
+    Dir.mktmpdir do |dir|
+      db = File.join(dir, 'app.sqlite3')
+      files = File.join(dir, 'storage')
+      File.write(db, '')
+      FileUtils.mkdir_p(files)
+      restic = FakeRestic.new
+      restic.database_file_path = nil
+
+      app = KamalBackup::App.new(
+        env: base_env(
+          'DATABASE_ADAPTER' => 'sqlite',
+          'SQLITE_DATABASE_PATH' => db,
+          'BACKUP_PATHS' => files
+        ),
+        restic: restic,
+        database: FakeDatabase.new(adapter_name: 'sqlite')
+      )
+
+      error = assert_raises(KamalBackup::ConfigurationError) do
+        app.dump_database(snapshot: 'latest', output_path: File.join(dir, 'out.sqlite3'))
+      end
+
+      assert_includes error.message, 'could not find database backup file'
     end
   end
 

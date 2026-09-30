@@ -100,6 +100,80 @@ module KamalBackup
       end
     end
 
+    def locate_database_dump(snapshot: 'latest', database_name: nil, validate_credentials: true)
+      if validate_credentials
+        config.validate_restic
+        config.validate_database_backup
+      else
+        config.required_app_name
+        raise ConfigurationError, 'RESTIC_REPOSITORY is required to dump from the backup accessory' unless config.restic_repository
+        raise ConfigurationError, 'databases must contain at least one database' if databases.empty?
+      end
+
+      adapter = select_database(database_name)
+      resolved_snapshot = resolve_snapshot(snapshot, tags: database_snapshot_tags(adapter))
+      database = database_config_name(adapter)
+      filename = restic.database_file(
+        resolved_snapshot,
+        adapter.adapter_name,
+        database_name: database
+      )
+      raise ConfigurationError, "could not find database backup file in snapshot #{resolved_snapshot}" unless filename
+
+      {
+        snapshot: resolved_snapshot,
+        database: database,
+        adapter: adapter.adapter_name,
+        filename: filename,
+        dump_extension: adapter.dump_extension
+      }
+    end
+
+    def dump_database(snapshot: 'latest', database_name: nil, output_path: nil, io: nil)
+      located = locate_database_dump(snapshot: snapshot, database_name: database_name)
+
+      if output_path
+        expanded = require_dump_output_path!(output_path)
+        warn_dump_extension!(expanded, located.fetch(:dump_extension))
+        restic.write_dump_to_path(located.fetch(:snapshot), located.fetch(:filename), expanded)
+        located.merge(output: expanded)
+      elsif io
+        restic.pipe_dump_to_io(located.fetch(:snapshot), located.fetch(:filename), io)
+        located.merge(output: 'io')
+      else
+        raise ConfigurationError, 'output path is required; pass -o PATH'
+      end
+    end
+
+    def require_dump_output_path!(output_path)
+      path = output_path.to_s.strip
+      raise ConfigurationError, 'output path is required; pass -o PATH' if path.empty?
+      if path.end_with?('/', '\\')
+        raise ConfigurationError, 'output path must be a file, not a directory'
+      end
+
+      expanded = File.expand_path(path)
+      if File.directory?(expanded)
+        raise ConfigurationError, "output path must be a file, not a directory: #{expanded}"
+      end
+
+      parent = File.dirname(expanded)
+      unless File.directory?(parent)
+        raise ConfigurationError, "output path directory does not exist: #{parent}"
+      end
+
+      expanded
+    end
+
+    def warn_dump_extension!(output_path, expected_extension)
+      expected = ".#{expected_extension}"
+      actual = File.extname(output_path.to_s)
+      return if actual.casecmp?(expected)
+
+      actual_label = actual.empty? ? 'no extension' : actual.inspect
+      warn("warning: output path has #{actual_label}; expected #{expected.inspect} for this database dump")
+    end
+
     def snapshots
       config.validate_restic
       restic.snapshots.stdout
@@ -522,6 +596,20 @@ module KamalBackup
                      else
                        config.databases.map { |database_config| Databases::Base.build(database_config, redactor: redactor) }
                      end
+    end
+
+    def select_database(database_name)
+      if database_name.to_s.strip.empty?
+        if databases.one?
+          databases.first
+        else
+          names = databases.map { |adapter| database_config_name(adapter) }.join(', ')
+          raise ConfigurationError, "multiple databases configured (#{names}); pass --database NAME"
+        end
+      else
+        databases.find { |adapter| database_config_name(adapter) == database_name } ||
+          raise(ConfigurationError, "database #{database_name.inspect} is not configured")
+      end
     end
 
     def resolve_snapshot(argument, tags:)
