@@ -142,9 +142,8 @@ module KamalBackup
 
       def dump_remote(snapshot, output_path:)
         config = remote_dump_config
-        repository = config.restic_repository ||
-                     raise(ConfigurationError, 'RESTIC_REPOSITORY is required to dump from the backup accessory')
-        located = remote_dump_app(config, repository).locate_database_dump(
+        location = remote_restic_location(config)
+        located = remote_dump_app(config, location).locate_database_dump(
           snapshot: snapshot,
           database_name: options[:database],
           validate_credentials: false
@@ -158,10 +157,10 @@ module KamalBackup
           File.open(temp_path, 'wb') do |file|
             bridge.stream_restic_dump(
               accessory_name: accessory_name,
-              repository: repository,
               snapshot: located.fetch(:snapshot),
               filename: filename,
-              io: file
+              io: file,
+              **location
             )
           end
           File.rename(temp_path, expanded)
@@ -179,12 +178,23 @@ module KamalBackup
         )
       end
 
-      def remote_dump_app(config, repository)
+      def remote_restic_location(config)
+        if (repository = config.restic_repository)
+          { repository: repository }
+        elsif (repository_file = config.restic_repository_file)
+          { repository_file: repository_file }
+        else
+          raise ConfigurationError,
+                'RESTIC_REPOSITORY or RESTIC_REPOSITORY_FILE is required to dump from the backup accessory'
+        end
+      end
+
+      def remote_dump_app(config, location)
         runner = lambda do |args, **|
           stdout = bridge.capture_restic_command(
             accessory_name: accessory_name,
-            repository: repository,
-            argv: args
+            argv: args,
+            **location
           )
           CommandResult.new(stdout: stdout, stderr: '', status: 0)
         end

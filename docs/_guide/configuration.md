@@ -275,6 +275,8 @@ restic:
 ```
 {: data-title="config/kamal-backup.yml"}
 
+`dump` forwards that path to restic inside the accessory. It does not read the file on your machine.
+
 ## Validate before boot
 
 Run this before booting or rebooting the accessory:

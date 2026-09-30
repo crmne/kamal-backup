@@ -1018,8 +1018,13 @@ class CLITest < Minitest::Test
       }
     ]
 
-    fake_bridge.define_singleton_method(:capture_restic_command) do |accessory_name:, repository:, argv:|
-      calls[:capture] << { accessory_name: accessory_name, repository: repository, argv: argv }
+    fake_bridge.define_singleton_method(:capture_restic_command) do |accessory_name:, argv:, repository: nil, repository_file: nil|
+      calls[:capture] << {
+        accessory_name: accessory_name,
+        repository: repository,
+        repository_file: repository_file,
+        argv: argv
+      }.compact
       case argv.first
       when 'snapshots'
         snapshots.to_json
@@ -1030,13 +1035,16 @@ class CLITest < Minitest::Test
       end
     end
 
-    fake_bridge.define_singleton_method(:stream_restic_dump) do |accessory_name:, repository:, snapshot:, filename:, io:|
-      calls[:stream] << {
+    fake_bridge.define_singleton_method(:stream_restic_dump) do |accessory_name:, snapshot:, filename:, io:, repository: nil,
+                                                                 repository_file: nil|
+      recorded = {
         accessory_name: accessory_name,
-        repository: repository,
         snapshot: snapshot,
         filename: filename
       }
+      recorded[:repository] = repository if repository
+      recorded[:repository_file] = repository_file if repository_file
+      calls[:stream] << recorded
       raise stream_error if stream_error
 
       io.write(dump_bytes)
@@ -1294,6 +1302,131 @@ class CLITest < Minitest::Test
       assert_equal 'dbsnap01', fake_bridge.stream_calls.first.fetch(:snapshot)
       assert_equal 'pgdump-bytes', File.read(output)
     end
+  end
+
+  def test_remote_dump_passes_a_repository_file_through_to_the_accessory
+    fake_bridge = remote_dump_bridge(
+      accessory_env: {
+        'APP_NAME' => 'test-app',
+        'DATABASE_ADAPTER' => 'postgres',
+        'DATABASE_URL' => 'postgres://app@postgres:5432/app_production'
+      }
+    )
+
+    Dir.mktmpdir do |dir|
+      config_dir = File.join(dir, 'config')
+      FileUtils.mkdir_p(config_dir)
+      File.write(File.join(config_dir, 'deploy.yml'), "accessories: {}\n")
+      File.write(
+        File.join(config_dir, 'kamal-backup.yml'),
+        <<~YAML
+          app: test-app
+          restic:
+            repository_file: /run/secrets/restic-repository
+            password: restic-secret
+        YAML
+      )
+      output = File.join(dir, 'out.pgdump')
+
+      Dir.chdir(dir) do
+        capture_io do
+          with_fake_bridge(fake_bridge) do
+            KamalBackup::CLI.start(['dump', 'latest', '-o', output], env: base_env)
+          end
+        end
+      end
+
+      assert_equal '/run/secrets/restic-repository', fake_bridge.stream_calls.first.fetch(:repository_file)
+      refute fake_bridge.stream_calls.first.key?(:repository)
+      capture_commands = fake_bridge.capture_calls.map { |call| call.fetch(:argv).first }
+      assert_equal %w[snapshots ls], capture_commands
+      fake_bridge.capture_calls.each do |call|
+        assert_equal '/run/secrets/restic-repository', call.fetch(:repository_file)
+        refute call.key?(:repository)
+      end
+      assert_equal 'pgdump-bytes', File.read(output)
+    end
+  end
+
+  def test_remote_dump_prefers_a_repository_url_over_a_repository_file
+    fake_bridge = remote_dump_bridge(
+      accessory_env: {
+        'APP_NAME' => 'test-app',
+        'DATABASE_ADAPTER' => 'postgres',
+        'DATABASE_URL' => 'postgres://app@postgres:5432/app_production'
+      }
+    )
+
+    Dir.mktmpdir do |dir|
+      config_dir = File.join(dir, 'config')
+      FileUtils.mkdir_p(config_dir)
+      File.write(File.join(config_dir, 'deploy.yml'), "accessories: {}\n")
+      File.write(
+        File.join(config_dir, 'kamal-backup.yml'),
+        <<~YAML
+          app: test-app
+          restic:
+            repository: s3:https://s3.example.com/bucket
+            repository_file: /run/secrets/restic-repository
+            password: restic-secret
+        YAML
+      )
+      output = File.join(dir, 'out.pgdump')
+
+      Dir.chdir(dir) do
+        capture_io do
+          with_fake_bridge(fake_bridge) do
+            KamalBackup::CLI.start(['dump', 'latest', '-o', output], env: base_env)
+          end
+        end
+      end
+
+      assert_equal 's3:https://s3.example.com/bucket', fake_bridge.stream_calls.first.fetch(:repository)
+      refute fake_bridge.stream_calls.first.key?(:repository_file)
+      fake_bridge.capture_calls.each do |call|
+        assert_equal 's3:https://s3.example.com/bucket', call.fetch(:repository)
+        refute call.key?(:repository_file)
+      end
+    end
+  end
+
+  def test_remote_dump_requires_a_repository_or_repository_file
+    fake_bridge = remote_dump_bridge(
+      accessory_env: {
+        'APP_NAME' => 'test-app',
+        'DATABASE_ADAPTER' => 'postgres',
+        'DATABASE_URL' => 'postgres://app@postgres:5432/app_production'
+      }
+    )
+
+    _, err = capture_io do
+      error = assert_raises(SystemExit) do
+        Dir.mktmpdir do |dir|
+          config_dir = File.join(dir, 'config')
+          FileUtils.mkdir_p(config_dir)
+          File.write(File.join(config_dir, 'deploy.yml'), "accessories: {}\n")
+          File.write(
+            File.join(config_dir, 'kamal-backup.yml'),
+            <<~YAML
+              app: test-app
+              restic:
+                password: restic-secret
+            YAML
+          )
+
+          Dir.chdir(dir) do
+            with_fake_bridge(fake_bridge) do
+              KamalBackup::CLI.start(['dump', 'latest', '-o', File.join(dir, 'out.pgdump')], env: base_env)
+            end
+          end
+        end
+      end
+      assert_equal 1, error.status
+    end
+
+    assert_includes err, 'RESTIC_REPOSITORY or RESTIC_REPOSITORY_FILE is required to dump from the backup accessory'
+    assert_empty fake_bridge.capture_calls
+    assert_empty fake_bridge.stream_calls
   end
 
   def test_remote_dump_leaves_no_output_file_when_backup_is_missing

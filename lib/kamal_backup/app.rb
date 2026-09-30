@@ -106,7 +106,10 @@ module KamalBackup
         config.validate_database_backup
       else
         config.required_app_name
-        raise ConfigurationError, 'RESTIC_REPOSITORY is required to dump from the backup accessory' unless config.restic_repository
+        unless config.restic_repository || config.restic_repository_file
+          raise ConfigurationError,
+                'RESTIC_REPOSITORY or RESTIC_REPOSITORY_FILE is required to dump from the backup accessory'
+        end
         raise ConfigurationError, 'databases must contain at least one database' if databases.empty?
       end
 

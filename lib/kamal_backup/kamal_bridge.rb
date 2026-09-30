@@ -88,9 +88,14 @@ module KamalBackup
 
     # Run restic on the live accessory over SSH + docker exec without Kamal's
     # log wrapper. Kamal accessory exec mixes INFO lines into stdout.
-    def capture_restic_command(accessory_name:, repository:, argv:)
+    def capture_restic_command(accessory_name:, argv:, repository: nil, repository_file: nil)
       stdout = +''
-      run_restic_on_accessory(accessory_name: accessory_name, repository: repository, argv: argv) do |stream|
+      run_restic_on_accessory(
+        accessory_name: accessory_name,
+        repository: repository,
+        repository_file: repository_file,
+        argv: argv
+      ) do |stream|
         stdout << stream.read
       end
       stdout
@@ -98,10 +103,11 @@ module KamalBackup
 
     # Stream a restic dump over SSH + docker exec without Kamal's log wrapper.
     # Kamal accessory exec mixes INFO lines into stdout, which corrupts binary dumps.
-    def stream_restic_dump(accessory_name:, repository:, snapshot:, filename:, io:)
+    def stream_restic_dump(accessory_name:, snapshot:, filename:, io:, repository: nil, repository_file: nil)
       run_restic_on_accessory(
         accessory_name: accessory_name,
         repository: repository,
+        repository_file: repository_file,
         argv: ['dump', snapshot.to_s, filename.to_s],
         snapshot: snapshot,
         filename: filename
@@ -123,7 +129,8 @@ module KamalBackup
 
     private
 
-    def run_restic_on_accessory(accessory_name:, repository:, argv:, snapshot: nil, filename: nil)
+    def run_restic_on_accessory(accessory_name:, argv:, snapshot: nil, filename: nil, repository: nil,
+                                repository_file: nil)
       config
       target = live_accessory_target(accessory_name)
       unless target
@@ -131,12 +138,13 @@ module KamalBackup
               "could not find a live backup accessory #{accessory_name.inspect} to dump from"
       end
 
-      remote = [
+      docker_argv = [
         'docker', 'exec',
-        '-e', "RESTIC_REPOSITORY=#{repository}",
+        '-e', restic_docker_env_assignment(repository: repository, repository_file: repository_file),
         target.fetch(:service_name),
         'restic', *Array(argv).map(&:to_s)
-      ].shelljoin
+      ]
+      remote = docker_argv.shelljoin
 
       with_ssh_identity_files do |identity_files, config_file|
         spec = CommandSpec.new(
@@ -154,14 +162,26 @@ module KamalBackup
               status.exitstatus,
               err,
               snapshot: snapshot || argv[1],
-              filename: filename || argv[2]
+              filename: filename || argv[2],
+              docker_argv: docker_argv
             )
           end
         end
       end
     end
 
-    def raise_restic_accessory_error(spec, status, stderr, snapshot:, filename:)
+    def restic_docker_env_assignment(repository:, repository_file:)
+      if repository && !repository.to_s.empty?
+        "RESTIC_REPOSITORY=#{repository}"
+      elsif repository_file && !repository_file.to_s.empty?
+        "RESTIC_REPOSITORY_FILE=#{repository_file}"
+      else
+        raise ConfigurationError,
+              'RESTIC_REPOSITORY or RESTIC_REPOSITORY_FILE is required to dump from the backup accessory'
+      end
+    end
+
+    def raise_restic_accessory_error(spec, status, stderr, snapshot:, filename:, docker_argv: nil)
       redacted = @redactor.redact_string(stderr.to_s)
       message =
         if stderr.to_s.match?(/no matching ID found|failed to find snapshot|no snapshot found/i)
@@ -169,7 +189,7 @@ module KamalBackup
         elsif filename && stderr.to_s.match?(/path .+ not found|does not exist|no such file/i)
           "backup file #{filename.inspect} not found in snapshot #{snapshot.inspect}"
         else
-          "command failed (#{status}): #{spec.display(@redactor)}\n#{redacted}"
+          "command failed (#{status}): #{redacted_restic_command(spec, docker_argv)}\n#{redacted}"
         end
 
       raise CommandError.new(
@@ -178,6 +198,16 @@ module KamalBackup
         status: status,
         stderr: redacted
       )
+    end
+
+    # Shell-escaping the live command hides query credentials from the redactor.
+    # Redact the docker arguments first, then escape that copy for the error text.
+    def redacted_restic_command(spec, docker_argv)
+      return spec.display(@redactor) unless docker_argv
+
+      prefix = spec.argv[0..-2].shelljoin
+      remote = docker_argv.map { |arg| @redactor.redact_string(arg) }.shelljoin
+      "#{prefix} #{remote}"
     end
 
     # Match Kamal's SSH defaults: user root, port 22, plus ssh.user, port, proxy,

@@ -909,6 +909,93 @@ class KamalBridgeTest < Minitest::Test
     end
   end
 
+  def test_failed_accessory_restic_redacts_repository_query_credentials
+    Dir.mktmpdir do |outer|
+      args_file = File.join(outer, 'ssh-args')
+      repository = 's3:https://s3.example.com/bucket?access_key_id=AKIAEXAMPLE&secret_access_key=s3cretvalue'
+      error = nil
+
+      with_fake_ssh(<<~SCRIPT) do
+        #!/bin/sh
+        printf '%s\\n' "$@" > #{args_file}
+        echo 'repository is already locked' >&2
+        exit 1
+      SCRIPT
+        Dir.mktmpdir do |dir|
+          bridge = KamalBackup::KamalBridge.new(redactor: KamalBackup::Redactor.new(env: {}), cwd: dir)
+          bridge.instance_variable_set(
+            :@config,
+            {
+              'service' => 'demo',
+              'accessories' => {
+                'backup' => {
+                  'host' => 'example.com',
+                  'service' => 'demo-backup'
+                }
+              }
+            }
+          )
+
+          error = assert_raises(KamalBackup::CommandError) do
+            bridge.stream_restic_dump(
+              accessory_name: 'backup',
+              repository: repository,
+              snapshot: 'latest',
+              filename: '/databases/demo/app/postgres.pgdump',
+              io: StringIO.new
+            )
+          end
+        end
+      end
+
+      assert_includes File.read(args_file), 'AKIAEXAMPLE'
+      assert_includes File.read(args_file), 's3cretvalue'
+      assert_includes error.message, '\\[REDACTED\\]'
+      refute_includes error.message, 'AKIAEXAMPLE'
+      refute_includes error.message, 's3cretvalue'
+    end
+  end
+
+  def test_stream_restic_dump_passes_repository_file_to_the_accessory
+    Dir.mktmpdir do |outer|
+      args_file = File.join(outer, 'ssh-args')
+
+      with_fake_ssh(<<~SCRIPT) do
+        #!/bin/sh
+        printf '%s\\n' "$@" > #{args_file}
+        printf dump-bytes
+      SCRIPT
+        Dir.mktmpdir do |dir|
+          bridge = KamalBackup::KamalBridge.new(redactor: KamalBackup::Redactor.new(env: {}), cwd: dir)
+          bridge.instance_variable_set(
+            :@config,
+            {
+              'service' => 'demo',
+              'accessories' => {
+                'backup' => {
+                  'host' => 'example.com',
+                  'service' => 'demo-backup'
+                }
+              }
+            }
+          )
+
+          bridge.stream_restic_dump(
+            accessory_name: 'backup',
+            repository_file: '/run/secrets/restic-repository',
+            snapshot: 'latest',
+            filename: '/databases/demo/app/postgres.pgdump',
+            io: StringIO.new
+          )
+        end
+      end
+
+      args = File.read(args_file)
+      assert_includes args, 'RESTIC_REPOSITORY_FILE\\=/run/secrets/restic-repository'
+      refute_includes args, 'RESTIC_REPOSITORY='
+    end
+  end
+
   def with_fake_ssh(script)
     Dir.mktmpdir do |dir|
       bin_dir = File.join(dir, 'bin')
