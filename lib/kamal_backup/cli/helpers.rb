@@ -5,6 +5,7 @@ require 'json'
 require 'shellwords'
 require 'thor'
 require_relative '../app'
+require_relative '../private_tempfile'
 require_relative '../command_output'
 require_relative '../config'
 require_relative '../kamal_bridge'
@@ -151,22 +152,21 @@ module KamalBackup
         filename = located.fetch(:filename)
         expanded = require_dump_output_path!(output_path)
         warn_dump_extension!(expanded, located.fetch(:dump_extension))
-        temp_path = "#{expanded}.kamal-backup-#{Process.pid}.tmp"
+        temp = nil
 
         begin
-          File.open(temp_path, 'wb') do |file|
-            bridge.stream_restic_dump(
-              accessory_name: accessory_name,
-              snapshot: located.fetch(:snapshot),
-              filename: filename,
-              io: file,
-              **location
-            )
-          end
-          File.rename(temp_path, expanded)
+          temp = PrivateTempfile.open(expanded)
+          bridge.stream_restic_dump(
+            accessory_name: accessory_name,
+            snapshot: located.fetch(:snapshot),
+            filename: filename,
+            io: temp,
+            **location
+          )
+          PrivateTempfile.publish(temp, expanded)
           warn("wrote #{filename.sub(%r{\A/+}, '')} from snapshot #{located.fetch(:snapshot)} to #{expanded}")
         ensure
-          FileUtils.rm_f(temp_path)
+          PrivateTempfile.discard(temp)
         end
       end
 

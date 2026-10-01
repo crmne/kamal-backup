@@ -1248,13 +1248,15 @@ class CLITest < Minitest::Test
       _, err = Dir.chdir(dir) do
         capture_io do
           with_fake_bridge(fake_bridge) do
-            KamalBackup::CLI.start(
-              ['dump', 'latest', '-o', output],
-              env: base_env(
-                'APP_NAME' => 'local-app-should-be-ignored',
-                'RESTIC_REPOSITORY' => '/tmp/local-repo-should-be-ignored'
+            with_umask(0) do
+              KamalBackup::CLI.start(
+                ['dump', 'latest', '-o', output],
+                env: base_env(
+                  'APP_NAME' => 'local-app-should-be-ignored',
+                  'RESTIC_REPOSITORY' => '/tmp/local-repo-should-be-ignored'
+                )
               )
-            )
+            end
           end
         end
       end
@@ -1268,10 +1270,41 @@ class CLITest < Minitest::Test
         }
       ], fake_bridge.stream_calls
       assert_equal 'pgdump-bytes', File.read(output)
+      assert_equal 0o600, File.stat(output).mode & 0o777
       assert_includes err, 'wrote databases/test-app/app/postgres.pgdump from snapshot dbsnap01 to'
       assert_empty Dir.glob("#{output}*.tmp")
       assert(fake_bridge.capture_calls.any? { |call| call[:argv].first == 'snapshots' })
       assert(fake_bridge.capture_calls.any? { |call| call[:argv].first == 'ls' })
+    end
+  end
+
+  def test_remote_dump_does_not_follow_a_precreated_temp_symlink
+    fake_bridge = remote_dump_bridge
+
+    Dir.mktmpdir do |dir|
+      config_dir = File.join(dir, 'config')
+      FileUtils.mkdir_p(config_dir)
+      File.write(File.join(config_dir, 'deploy.yml'), "accessories: {}\n")
+      output = File.join(dir, 'out.pgdump')
+      victim = File.join(dir, 'victim')
+      File.write(victim, 'keep-me')
+      trap = "#{output}.kamal-backup-#{Process.pid}.tmp"
+      File.symlink(victim, trap)
+
+      Dir.chdir(dir) do
+        capture_io do
+          with_fake_bridge(fake_bridge) do
+            with_umask(0) do
+              KamalBackup::CLI.start(['dump', 'latest', '-o', output], env: base_env)
+            end
+          end
+        end
+      end
+
+      assert_equal 'keep-me', File.read(victim)
+      assert_equal 'pgdump-bytes', File.read(output)
+      assert_equal 0o600, File.stat(output).mode & 0o777
+      assert_equal [trap], Dir.glob("#{output}*.tmp")
     end
   end
 

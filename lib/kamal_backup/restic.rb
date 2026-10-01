@@ -6,6 +6,7 @@ require 'json'
 require 'open3'
 require 'time'
 require_relative 'command'
+require_relative 'private_tempfile'
 
 module KamalBackup
   class Restic
@@ -182,30 +183,28 @@ module KamalBackup
       parent = File.dirname(target_path)
       raise ConfigurationError, "output path directory does not exist: #{parent}" unless File.directory?(parent)
 
-      temp_path = "#{target_path}.kamal-backup-#{Process.pid}.tmp"
-
+      temp = nil
       output = Command.output
       context = output&.command_start(command, redactor: redactor)
+      temp = PrivateTempfile.open(target_path)
       Open3.popen3(command.env, *command.argv) do |stdin, stdout, stderr, wait_thread|
         stdin.close
         stderr_reader = Thread.new do
           Command.collect_stream(stderr, command_output: output, context: context, stream: :stderr, redactor: redactor)
         end
-        File.open(temp_path, 'wb') { |file| IO.copy_stream(stdout, file) }
+        IO.copy_stream(stdout, temp)
         err = stderr_reader.value
         status = wait_thread.value
         output&.command_exit(context, status.exitstatus)
         raise_command_error(command, status, '', err) unless status.success?
       end
-      File.rename(temp_path, target_path)
+      PrivateTempfile.publish(temp, target_path)
       target_path
     rescue Errno::ENOENT => e
-      FileUtils.rm_f(temp_path) if temp_path
       raise CommandError.new("command not found: #{command.argv.first}", command: command, status: 127,
                                                                          stderr: e.message)
-    rescue StandardError
-      FileUtils.rm_f(temp_path) if temp_path
-      raise
+    ensure
+      PrivateTempfile.discard(temp)
     end
 
     def pipe_dump_to_io(snapshot, filename, io)

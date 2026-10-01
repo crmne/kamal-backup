@@ -591,11 +591,35 @@ class ResticTest < Minitest::Test
       target = File.join(dir, 'restore', 'database.dump')
       FileUtils.mkdir_p(File.dirname(target))
 
-      written = plumbing_restic.write_dump_to_path('snap', 'database.dump', target)
+      written = with_umask(0) do
+        plumbing_restic.write_dump_to_path('snap', 'database.dump', target)
+      end
 
       assert_equal target, written
       assert_equal 'dump-bytes', File.read(target)
+      assert_equal 0o600, File.stat(target).mode & 0o777
+      refute File.symlink?(target)
       assert_empty Dir.glob("#{target}*.tmp")
+    end
+  end
+
+  def test_write_dump_to_path_does_not_follow_a_precreated_temp_symlink
+    with_fake_restic("#!/bin/sh\nprintf dump-bytes\n") do |dir|
+      target = File.join(dir, 'restore', 'database.dump')
+      FileUtils.mkdir_p(File.dirname(target))
+      victim = File.join(dir, 'victim')
+      File.write(victim, 'keep-me')
+      trap = "#{target}.kamal-backup-#{Process.pid}.tmp"
+      File.symlink(victim, trap)
+
+      with_umask(0) do
+        plumbing_restic.write_dump_to_path('snap', 'database.dump', target)
+      end
+
+      assert_equal 'keep-me', File.read(victim)
+      assert_equal 'dump-bytes', File.read(target)
+      assert_equal 0o600, File.stat(target).mode & 0o777
+      assert_equal [trap], Dir.glob("#{target}*.tmp")
     end
   end
 
