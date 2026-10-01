@@ -909,7 +909,7 @@ class KamalBridgeTest < Minitest::Test
     end
   end
 
-  def test_failed_accessory_restic_redacts_repository_query_credentials
+  def test_accessory_restic_keeps_repository_query_credentials_off_the_ssh_command
     Dir.mktmpdir do |outer|
       args_file = File.join(outer, 'ssh-args')
       repository = 's3:https://s3.example.com/bucket?access_key_id=AKIAEXAMPLE&secret_access_key=s3cretvalue'
@@ -918,7 +918,7 @@ class KamalBridgeTest < Minitest::Test
       with_fake_ssh(<<~SCRIPT) do
         #!/bin/sh
         printf '%s\\n' "$@" > #{args_file}
-        echo 'repository is already locked' >&2
+        echo 'Fatal: unable to open repository at s3:https://s3.example.com/bucket?access_key_id=AKIAEXAMPLE&secret_access_key=s3cretvalue' >&2
         exit 1
       SCRIPT
         Dir.mktmpdir do |dir|
@@ -948,11 +948,88 @@ class KamalBridgeTest < Minitest::Test
         end
       end
 
-      assert_includes File.read(args_file), 'AKIAEXAMPLE'
-      assert_includes File.read(args_file), 's3cretvalue'
-      assert_includes error.message, '\\[REDACTED\\]'
+      args = File.read(args_file)
+      refute_includes args, 'AKIAEXAMPLE'
+      refute_includes args, 's3cretvalue'
+      refute_includes args, 'RESTIC_REPOSITORY='
+      refute_includes error.command.argv.join("\n"), 'AKIAEXAMPLE'
+      refute_includes error.command.argv.join("\n"), 's3cretvalue'
+      assert_includes error.message, '[REDACTED]'
       refute_includes error.message, 'AKIAEXAMPLE'
       refute_includes error.message, 's3cretvalue'
+    end
+  end
+
+  def test_capture_restic_command_keeps_listing_errors_generic
+    with_fake_ssh(<<~SCRIPT) do
+      #!/bin/sh
+      echo 'open /run/secrets/restic-repository: no such file or directory' >&2
+      exit 1
+    SCRIPT
+      Dir.mktmpdir do |dir|
+        bridge = KamalBackup::KamalBridge.new(redactor: KamalBackup::Redactor.new(env: {}), cwd: dir)
+        bridge.instance_variable_set(
+          :@config,
+          {
+            'service' => 'demo',
+            'accessories' => {
+              'backup' => {
+                'host' => 'example.com',
+                'service' => 'demo-backup'
+              }
+            }
+          }
+        )
+
+        error = assert_raises(KamalBackup::CommandError) do
+          bridge.capture_restic_command(
+            accessory_name: 'backup',
+            repository_file: '/run/secrets/restic-repository',
+            argv: ['snapshots', '--json', '--tag', 'app:demo']
+          )
+        end
+
+        assert_includes error.message, 'command failed (1)'
+        assert_includes error.message, 'no such file or directory'
+        refute_includes error.message, 'backup file "--tag"'
+        refute_includes error.message, 'backup not found for snapshot "--json"'
+      end
+    end
+  end
+
+  def test_capture_restic_command_keeps_missing_snapshot_listing_errors_generic
+    with_fake_ssh(<<~SCRIPT) do
+      #!/bin/sh
+      echo 'Fatal: failed to find snapshot: no matching ID found for prefix "abcdef"' >&2
+      exit 1
+    SCRIPT
+      Dir.mktmpdir do |dir|
+        bridge = KamalBackup::KamalBridge.new(redactor: KamalBackup::Redactor.new(env: {}), cwd: dir)
+        bridge.instance_variable_set(
+          :@config,
+          {
+            'service' => 'demo',
+            'accessories' => {
+              'backup' => {
+                'host' => 'example.com',
+                'service' => 'demo-backup'
+              }
+            }
+          }
+        )
+
+        error = assert_raises(KamalBackup::CommandError) do
+          bridge.capture_restic_command(
+            accessory_name: 'backup',
+            repository: '/var/lib/restic-repo',
+            argv: ['ls', '--json', 'abcdef']
+          )
+        end
+
+        assert_includes error.message, 'command failed (1)'
+        refute_includes error.message, 'backup not found for snapshot "--json"'
+        refute_includes error.message, 'backup not found for snapshot "abcdef"'
+      end
     end
   end
 

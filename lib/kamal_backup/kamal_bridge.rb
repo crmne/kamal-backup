@@ -138,12 +138,11 @@ module KamalBackup
               "could not find a live backup accessory #{accessory_name.inspect} to dump from"
       end
 
-      docker_argv = [
-        'docker', 'exec',
-        '-e', restic_docker_env_assignment(repository: repository, repository_file: repository_file),
-        target.fetch(:service_name),
-        'restic', *Array(argv).map(&:to_s)
-      ]
+      docker_argv = %w[docker exec]
+      if (assignment = restic_repository_file_assignment(repository: repository, repository_file: repository_file))
+        docker_argv.push('-e', assignment)
+      end
+      docker_argv.push(target.fetch(:service_name), 'restic', *Array(argv).map(&:to_s))
       remote = docker_argv.shelljoin
 
       with_ssh_identity_files do |identity_files, config_file|
@@ -161,8 +160,8 @@ module KamalBackup
               spec,
               status.exitstatus,
               err,
-              snapshot: snapshot || argv[1],
-              filename: filename || argv[2],
+              snapshot: snapshot,
+              filename: filename,
               docker_argv: docker_argv
             )
           end
@@ -170,23 +169,24 @@ module KamalBackup
       end
     end
 
-    def restic_docker_env_assignment(repository:, repository_file:)
-      if repository && !repository.to_s.empty?
-        "RESTIC_REPOSITORY=#{repository}"
-      elsif repository_file && !repository_file.to_s.empty?
-        "RESTIC_REPOSITORY_FILE=#{repository_file}"
-      else
-        raise ConfigurationError,
-              'RESTIC_REPOSITORY or RESTIC_REPOSITORY_FILE is required to dump from the backup accessory'
-      end
+    # The running accessory already has RESTIC_REPOSITORY. Repeating that URL
+    # on the SSH command line exposes query credentials in the local process list.
+    # A repository file is only a path inside the accessory.
+    def restic_repository_file_assignment(repository:, repository_file:)
+      return if repository && !repository.to_s.empty?
+      return "RESTIC_REPOSITORY_FILE=#{repository_file}" if repository_file && !repository_file.to_s.empty?
+
+      raise ConfigurationError,
+            'RESTIC_REPOSITORY or RESTIC_REPOSITORY_FILE is required to dump from the backup accessory'
     end
 
     def raise_restic_accessory_error(spec, status, stderr, snapshot:, filename:, docker_argv: nil)
       redacted = @redactor.redact_string(stderr.to_s)
+      dump_context = snapshot && filename
       message =
-        if stderr.to_s.match?(/no matching ID found|failed to find snapshot|no snapshot found/i)
+        if dump_context && stderr.to_s.match?(/no matching ID found|failed to find snapshot|no snapshot found/i)
           "backup not found for snapshot #{snapshot.inspect}"
-        elsif filename && stderr.to_s.match?(/path .+ not found|does not exist|no such file/i)
+        elsif dump_context && stderr.to_s.match?(/path .+ not found|does not exist|no such file/i)
           "backup file #{filename.inspect} not found in snapshot #{snapshot.inspect}"
         else
           "command failed (#{status}): #{redacted_restic_command(spec, docker_argv)}\n#{redacted}"
