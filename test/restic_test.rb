@@ -373,6 +373,46 @@ class ResticTest < Minitest::Test
     refute restic_env.key?('UNRELATED_VALUE')
   end
 
+  def test_environment_for_includes_yaml_repository_password_file_and_password_command
+    Dir.mktmpdir do |dir|
+      config_dir = File.join(dir, 'config')
+      FileUtils.mkdir_p(config_dir)
+      File.write(
+        File.join(config_dir, 'kamal-backup.yml'),
+        <<~YAML
+          app: test-app
+          restic:
+            repository: s3:https://s3.example.com/bucket?token=yaml-token-value
+            password:
+              file: /run/secrets/restic-password
+        YAML
+      )
+      file_config = KamalBackup::Config.new(env: {}, cwd: dir, load_project_defaults: false)
+
+      File.write(
+        File.join(config_dir, 'kamal-backup.yml'),
+        <<~YAML
+          app: test-app
+          restic:
+            repository_file: /run/secrets/restic-repository
+            password:
+              command: printf yaml-restic-password
+        YAML
+      )
+      command_config = KamalBackup::Config.new(env: {}, cwd: dir, load_project_defaults: false)
+
+      file_env = KamalBackup::Restic.environment_for(file_config)
+      command_env = KamalBackup::Restic.environment_for(command_config)
+
+      assert_equal 's3:https://s3.example.com/bucket?token=yaml-token-value', file_env.fetch('RESTIC_REPOSITORY')
+      assert_equal '/run/secrets/restic-password', file_env.fetch('RESTIC_PASSWORD_FILE')
+      refute file_env.key?('RESTIC_PASSWORD')
+      assert_equal '/run/secrets/restic-repository', command_env.fetch('RESTIC_REPOSITORY_FILE')
+      assert_equal 'printf yaml-restic-password', command_env.fetch('RESTIC_PASSWORD_COMMAND')
+      refute command_env.key?('RESTIC_PASSWORD')
+    end
+  end
+
   class InitTrackingRestic < KamalBackup::Restic
     attr_reader :calls
 
@@ -583,6 +623,28 @@ class ResticTest < Minitest::Test
       ensure
         ENV['PATH'] = previous_path
       end
+    end
+  end
+
+  def test_write_dump_to_path_refuses_to_replace_a_file_created_during_the_download
+    with_fake_restic("#!/bin/sh\nprintf winner > \"$1\"\nprintf loser\n") do |dir|
+      target = File.join(dir, 'restore', 'database.dump')
+      FileUtils.mkdir_p(File.dirname(target))
+      script = File.join(dir, 'bin', 'restic')
+      File.write(script, <<~SCRIPT)
+        #!/bin/sh
+        printf winner > #{Shellwords.escape(target)}
+        printf loser
+      SCRIPT
+      FileUtils.chmod('+x', script)
+
+      error = assert_raises(KamalBackup::ConfigurationError) do
+        plumbing_restic.write_dump_to_path('snap', 'database.dump', target, overwrite: false)
+      end
+
+      assert_includes error.message, 'output file already exists'
+      assert_equal 'winner', File.read(target)
+      assert_empty Dir.glob("#{target}*.tmp")
     end
   end
 

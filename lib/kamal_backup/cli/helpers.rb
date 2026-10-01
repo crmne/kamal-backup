@@ -135,13 +135,16 @@ module KamalBackup
         warn("warning: output path has #{actual_label}; expected #{expected.inspect} for this database dump")
       end
 
-      def confirm_dump_overwrite!(output_path)
-        return unless File.exist?(output_path)
+      def dump_overwrite?(output_path)
+        return true if options[:yes]
+        return false unless File.exist?(output_path)
 
         confirm!("Overwrite #{output_path}? This will replace the existing file.")
+        true
       end
 
-      def dump_remote(snapshot, output_path:)
+      def dump_remote(snapshot, output_path:, overwrite:)
+        ensure_remote_version_match!
         config = remote_dump_config
         location = remote_restic_location(config)
         located = remote_dump_app(config, location).locate_database_dump(
@@ -163,7 +166,7 @@ module KamalBackup
             io: temp,
             **location
           )
-          PrivateTempfile.publish(temp, expanded)
+          PrivateTempfile.publish(temp, expanded, overwrite: overwrite)
           warn("wrote #{filename.sub(%r{\A/+}, '')} from snapshot #{located.fetch(:snapshot)} to #{expanded}")
         ensure
           PrivateTempfile.discard(temp)

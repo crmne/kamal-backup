@@ -75,8 +75,13 @@ class AppTest < Minitest::Test
       @database_file_path
     end
 
-    def write_dump_to_path(snapshot, filename, target_path)
-      @write_dump_calls << { snapshot: snapshot, filename: filename, target_path: target_path }
+    def write_dump_to_path(snapshot, filename, target_path, overwrite: false)
+      @write_dump_calls << {
+        snapshot: snapshot,
+        filename: filename,
+        target_path: target_path,
+        overwrite: overwrite
+      }
       File.write(target_path, @dump_bytes)
       target_path
     end
@@ -1133,6 +1138,46 @@ class AppTest < Minitest::Test
       assert_equal 'dump-bytes', File.read(output)
       assert_equal 1, restic.write_dump_calls.size
       assert_equal 'latest-database-snapshot', restic.write_dump_calls.first.fetch(:snapshot)
+      assert_equal false, restic.write_dump_calls.first.fetch(:overwrite)
+    end
+  end
+
+  def test_dump_database_reads_a_stored_dump_when_the_source_is_unavailable
+    Dir.mktmpdir do |dir|
+      config_dir = File.join(dir, 'config')
+      FileUtils.mkdir_p(config_dir)
+      missing_sqlite = File.join(dir, 'missing.sqlite3')
+      output = File.join(dir, 'out.sqlite3')
+      File.write(
+        File.join(config_dir, 'kamal-backup.yml'),
+        <<~YAML
+          app: test-app
+          databases:
+            - name: app
+              adapter: sqlite
+              path: #{missing_sqlite}
+            - name: other
+              adapter: postgres
+              url:
+                secret: OTHER_DATABASE_URL
+          restic:
+            repository: /tmp/restic-repo
+            password: restic-secret
+        YAML
+      )
+      restic = FakeRestic.new
+      restic.database_file_path = 'databases/test-app/app/sqlite.sqlite3'
+      app = KamalBackup::App.new(
+        config: KamalBackup::Config.new(env: {}, cwd: dir, load_project_defaults: false),
+        restic: restic
+      )
+
+      result = app.dump_database(snapshot: 'latest', database_name: 'app', output_path: output)
+
+      refute_path_exists missing_sqlite
+      assert_equal 'databases/test-app/app/sqlite.sqlite3', result.fetch(:filename)
+      assert_equal output, result.fetch(:output)
+      assert_equal 'dump-bytes', File.read(output)
     end
   end
 

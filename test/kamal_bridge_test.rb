@@ -1068,8 +1068,92 @@ class KamalBridgeTest < Minitest::Test
       end
 
       args = File.read(args_file)
-      assert_includes args, 'RESTIC_REPOSITORY_FILE\\=/run/secrets/restic-repository'
-      refute_includes args, 'RESTIC_REPOSITORY='
+      assert_includes args, 'kamal-backup run-restic --'
+      refute_includes args, 'RESTIC_REPOSITORY'
+      refute_includes args, '/run/secrets/restic-repository'
+    end
+  end
+
+  def test_accessory_restic_loads_mounted_config_instead_of_injecting_repository_settings
+    Dir.mktmpdir do |outer|
+      args_file = File.join(outer, 'ssh-args')
+
+      with_fake_ssh(<<~SCRIPT) do
+        #!/bin/sh
+        printf '%s\\n' "$@" > #{args_file}
+        printf dump-bytes
+      SCRIPT
+        Dir.mktmpdir do |dir|
+          bridge = KamalBackup::KamalBridge.new(redactor: KamalBackup::Redactor.new(env: {}), cwd: dir)
+          bridge.instance_variable_set(
+            :@config,
+            {
+              'service' => 'demo',
+              'accessories' => {
+                'backup' => {
+                  'host' => 'example.com',
+                  'service' => 'demo-backup'
+                }
+              }
+            }
+          )
+
+          bridge.stream_restic_dump(
+            accessory_name: 'backup',
+            snapshot: 'latest',
+            filename: '/databases/demo/app/postgres.pgdump',
+            io: StringIO.new
+          )
+        end
+      end
+
+      args = File.read(args_file)
+      assert_includes args, 'docker exec demo-backup kamal-backup run-restic -- dump latest '
+      refute_includes args, 'RESTIC_REPOSITORY'
+      refute_includes args, 'RESTIC_PASSWORD'
+    end
+  end
+
+  def test_accessory_restic_redacts_proxy_command_credentials
+    with_fake_ssh(<<~SCRIPT) do
+      #!/bin/sh
+      echo 'ssh: connect failed' >&2
+      exit 1
+    SCRIPT
+      Dir.mktmpdir do |dir|
+        bridge = KamalBackup::KamalBridge.new(redactor: KamalBackup::Redactor.new(env: {}), cwd: dir)
+        bridge.instance_variable_set(
+          :@config,
+          {
+            'service' => 'demo',
+            'ssh_options' => {
+              'proxy' => {
+                'command' => 'sh -c curl https://proxy.example/connect?token=proxy-secret-value'
+              }
+            },
+            'accessories' => {
+              'backup' => {
+                'host' => 'example.com',
+                'service' => 'demo-backup'
+              }
+            }
+          }
+        )
+
+        error = assert_raises(KamalBackup::CommandError) do
+          bridge.stream_restic_dump(
+            accessory_name: 'backup',
+            repository: 's3:https://s3.example.com/bucket?token=repo-token-value',
+            snapshot: 'latest',
+            filename: '/databases/demo/app/postgres.pgdump',
+            io: StringIO.new
+          )
+        end
+
+        refute_includes error.message, 'proxy-secret-value'
+        refute_includes error.message, 'repo-token-value'
+        assert_includes error.message, 'REDACTED'
+      end
     end
   end
 

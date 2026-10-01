@@ -11,7 +11,7 @@ class PrivateTempfileTest < Minitest::Test
       with_umask(0) do
         file = KamalBackup::PrivateTempfile.open(target)
         file.write('dump-bytes')
-        KamalBackup::PrivateTempfile.publish(file, target)
+        KamalBackup::PrivateTempfile.publish(file, target, overwrite: true)
         KamalBackup::PrivateTempfile.discard(file)
       end
 
@@ -34,7 +34,7 @@ class PrivateTempfileTest < Minitest::Test
       with_umask(0) do
         file = KamalBackup::PrivateTempfile.open(target)
         file.write('dump-bytes')
-        KamalBackup::PrivateTempfile.publish(file, target)
+        KamalBackup::PrivateTempfile.publish(file, target, overwrite: false)
       ensure
         KamalBackup::PrivateTempfile.discard(file)
       end
@@ -44,6 +44,25 @@ class PrivateTempfileTest < Minitest::Test
       assert_equal 0o600, File.stat(target).mode & 0o777
       assert_equal [trap], Dir.glob("#{target}*.tmp")
       assert_equal victim, File.readlink(trap)
+    end
+  end
+
+  def test_publish_without_overwrite_leaves_a_file_created_after_open
+    Dir.mktmpdir do |dir|
+      target = File.join(dir, 'database.dump')
+      file = KamalBackup::PrivateTempfile.open(target)
+      file.write('downloaded')
+      File.write(target, 'winner')
+
+      error = assert_raises(KamalBackup::ConfigurationError) do
+        KamalBackup::PrivateTempfile.publish(file, target, overwrite: false)
+      end
+
+      assert_includes error.message, 'output file already exists'
+      assert_includes error.message, 'pass --yes to overwrite'
+      assert_equal 'winner', File.read(target)
+    ensure
+      KamalBackup::PrivateTempfile.discard(file)
     end
   end
 

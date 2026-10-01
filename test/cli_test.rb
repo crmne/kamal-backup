@@ -996,6 +996,7 @@ class CLITest < Minitest::Test
       'RESTIC_REPOSITORY' => '/var/lib/restic-repo'
     }
     fake_bridge.define_singleton_method(:accessory_name) { |**| 'backup' }
+    fake_bridge.define_singleton_method(:remote_version) { |**| KamalBackup::VERSION }
     fake_bridge.define_singleton_method(:accessory_environment) { |**| env }
     fake_bridge.define_singleton_method(:capture_calls) { calls[:capture] }
     fake_bridge.define_singleton_method(:stream_calls) { calls[:stream] }
@@ -1143,7 +1144,9 @@ class CLITest < Minitest::Test
 
   def test_dump_overwrites_an_existing_file_when_yes_is_passed
     fake = Object.new
-    fake.define_singleton_method(:dump_database) do |output_path:, **|
+    received = {}
+    fake.define_singleton_method(:dump_database) do |output_path:, overwrite:, **|
+      received[:overwrite] = overwrite
       File.write(output_path, 'replaced')
       {
         snapshot: 'abc123',
@@ -1167,6 +1170,7 @@ class CLITest < Minitest::Test
       end
 
       assert_equal 'replaced', File.read(output)
+      assert_equal true, received.fetch(:overwrite)
     end
   end
 
@@ -1202,10 +1206,11 @@ class CLITest < Minitest::Test
   def test_local_dump_writes_through_the_app
     fake = Object.new
     received = {}
-    fake.define_singleton_method(:dump_database) do |snapshot:, database_name:, output_path:|
+    fake.define_singleton_method(:dump_database) do |snapshot:, database_name:, output_path:, overwrite:|
       received[:snapshot] = snapshot
       received[:database_name] = database_name
       received[:output_path] = output_path
+      received[:overwrite] = overwrite
       {
         snapshot: snapshot,
         database: 'app',
@@ -1232,6 +1237,7 @@ class CLITest < Minitest::Test
       assert_equal 'abc123', received.fetch(:snapshot)
       assert_equal 'app', received.fetch(:database_name)
       assert_equal output, received.fetch(:output_path)
+      assert_equal false, received.fetch(:overwrite)
       assert_includes err, 'wrote databases/test-app/app/postgres.pgdump from snapshot abc123 to'
     end
   end
@@ -1462,9 +1468,82 @@ class CLITest < Minitest::Test
     assert_empty fake_bridge.stream_calls
   end
 
+  def test_remote_dump_keeps_a_file_created_while_the_download_is_running
+    fake_bridge = remote_dump_bridge
+
+    Dir.mktmpdir do |dir|
+      config_dir = File.join(dir, 'config')
+      FileUtils.mkdir_p(config_dir)
+      File.write(File.join(config_dir, 'deploy.yml'), "accessories: {}\n")
+      output = File.join(dir, 'out.pgdump')
+      fake_bridge.define_singleton_method(:stream_restic_dump) do |io:, **|
+        File.write(output, 'winner')
+        io.write('loser')
+        true
+      end
+
+      _, err = Dir.chdir(dir) do
+        capture_io do
+          error = assert_raises(SystemExit) do
+            with_fake_bridge(fake_bridge) do
+              KamalBackup::CLI.start(['dump', 'latest', '-o', output], env: base_env)
+            end
+          end
+          assert_equal 1, error.status
+        end
+      end
+
+      assert_equal 'winner', File.read(output)
+      assert_includes err, 'output file already exists'
+      assert_includes err, 'pass --yes to overwrite'
+      assert_empty Dir.glob("#{output}*.tmp")
+    end
+  end
+
+  def test_run_restic_execs_with_yaml_repository_and_password_file
+    execs = []
+    KamalBackup::CLI.prepend(Module.new do
+      define_method(:exec) { |*args| execs << args }
+    end)
+
+    Dir.mktmpdir do |dir|
+      config_dir = File.join(dir, 'config')
+      FileUtils.mkdir_p(config_dir)
+      password_file = File.join(dir, 'restic-password')
+      File.write(password_file, "secret\n")
+      File.write(
+        File.join(config_dir, 'kamal-backup.yml'),
+        <<~YAML
+          app: test-app
+          restic:
+            repository: s3:https://s3.example.com/bucket?token=yaml-token-value
+            password:
+              file: #{password_file}
+        YAML
+      )
+
+      Dir.chdir(dir) do
+        capture_io do
+          KamalBackup::CLI.start(['run-restic', 'snapshots', '--json'], env: {})
+        end
+        help, = capture_io do
+          KamalBackup::CLI.start(['help'])
+        end
+        refute_includes help, 'run-restic'
+      end
+
+      env, *argv = execs.fetch(0)
+      assert_equal ['restic', 'snapshots', '--json'], argv
+      assert_equal 's3:https://s3.example.com/bucket?token=yaml-token-value', env.fetch('RESTIC_REPOSITORY')
+      assert_equal password_file, env.fetch('RESTIC_PASSWORD_FILE')
+      refute env.key?('RESTIC_PASSWORD')
+    end
+  end
+
   def test_remote_dump_leaves_no_output_file_when_backup_is_missing
     fake_bridge = Object.new
     fake_bridge.define_singleton_method(:accessory_name) { |**| 'backup' }
+    fake_bridge.define_singleton_method(:remote_version) { |**| KamalBackup::VERSION }
     fake_bridge.define_singleton_method(:accessory_environment) do |**|
       {
         'APP_NAME' => 'test-app',

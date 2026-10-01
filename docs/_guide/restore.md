@@ -12,7 +12,7 @@ When you only need the raw database dump file, use `dump` instead of a full rest
 bundle exec kamal-backup dump latest -o tmp/app.pgdump
 ```
 
-`-o`/`--output` is required, must name a file (not a directory), and the parent directory must already exist. If that file already exists, `dump` stops until you confirm. Pass `--yes` to overwrite without a prompt. See [Commands](/commands/) for details.
+`-o`/`--output` is required, must name a file (not a directory), and the parent directory must already exist. If that file already exists, `dump` stops until you confirm. Pass `--yes` to overwrite without a prompt. `--yes`, or a confirmation given before the download, is also what allows replacing a file that appears at that path while the dump is downloading. See [Commands](/commands/) for details.
 
 `restore production` replaces the target database rather than layering a dump over whatever is already there:
 

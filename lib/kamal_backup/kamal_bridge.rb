@@ -138,11 +138,12 @@ module KamalBackup
               "could not find a live backup accessory #{accessory_name.inspect} to dump from"
       end
 
-      docker_argv = %w[docker exec]
-      if (assignment = restic_repository_file_assignment(repository: repository, repository_file: repository_file))
-        docker_argv.push('-e', assignment)
-      end
-      docker_argv.push(target.fetch(:service_name), 'restic', *Array(argv).map(&:to_s))
+      docker_argv = accessory_restic_docker_argv(
+        target.fetch(:service_name),
+        argv,
+        repository: repository,
+        repository_file: repository_file
+      )
       remote = docker_argv.shelljoin
 
       with_ssh_identity_files do |identity_files, config_file|
@@ -169,15 +170,16 @@ module KamalBackup
       end
     end
 
-    # The running accessory already has RESTIC_REPOSITORY. Repeating that URL
-    # on the SSH command line exposes query credentials in the local process list.
-    # A repository file is only a path inside the accessory.
-    def restic_repository_file_assignment(repository:, repository_file:)
-      return if repository && !repository.to_s.empty?
-      return "RESTIC_REPOSITORY_FILE=#{repository_file}" if repository_file && !repository_file.to_s.empty?
+    # The accessory command loads config/kamal-backup.yml itself. Repository URLs,
+    # repository files, password files, and password commands stay in that process
+    # and are not repeated on the SSH command line.
+    def accessory_restic_docker_argv(service_name, argv, repository:, repository_file:)
+      command = ['docker', 'exec', service_name, 'kamal-backup', 'run-restic', '--', *Array(argv).map(&:to_s)]
+      forbidden = [repository, repository_file].compact.map(&:to_s).reject(&:empty?)
+      leaked = forbidden.intersect?(command) || command.any? { |arg| arg.include?('RESTIC_REPOSITORY') }
+      raise ConfigurationError, 'refusing to place repository settings on the accessory command' if leaked
 
-      raise ConfigurationError,
-            'RESTIC_REPOSITORY or RESTIC_REPOSITORY_FILE is required to dump from the backup accessory'
+      command
     end
 
     def raise_restic_accessory_error(spec, status, stderr, snapshot:, filename:, docker_argv: nil)
@@ -200,12 +202,12 @@ module KamalBackup
       )
     end
 
-    # Shell-escaping the live command hides query credentials from the redactor.
-    # Redact the docker arguments first, then escape that copy for the error text.
+    # Shell-escaping hides query credentials from a later redactor pass, including
+    # ProxyCommand URLs. Redact each argument first, then escape that copy.
     def redacted_restic_command(spec, docker_argv)
       return spec.display(@redactor) unless docker_argv
 
-      prefix = spec.argv[0..-2].shelljoin
+      prefix = spec.argv[0..-2].map { |arg| @redactor.redact_string(arg) }.shelljoin
       remote = docker_argv.map { |arg| @redactor.redact_string(arg) }.shelljoin
       "#{prefix} #{remote}"
     end

@@ -175,7 +175,7 @@ module KamalBackup
       pipe_commands(restic_command, command, producer_label: 'restic dump', consumer_label: command.argv.first)
     end
 
-    def write_dump_to_path(snapshot, filename, target_path)
+    def write_dump_to_path(snapshot, filename, target_path, overwrite: false)
       command = CommandSpec.new(argv: ['restic', 'dump', snapshot, filename], env: restic_env)
       target_path = File.expand_path(target_path)
       raise ConfigurationError, "output path must be a file, not a directory: #{target_path}" if File.directory?(target_path)
@@ -198,7 +198,7 @@ module KamalBackup
         output&.command_exit(context, status.exitstatus)
         raise_command_error(command, status, '', err) unless status.success?
       end
-      PrivateTempfile.publish(temp, target_path)
+      PrivateTempfile.publish(temp, target_path, overwrite: overwrite)
       target_path
     rescue Errno::ENOENT => e
       raise CommandError.new("command not found: #{command.argv.first}", command: command, status: 127,
@@ -231,6 +231,12 @@ module KamalBackup
     def restore_snapshot(snapshot, target)
       log("restoring file snapshot #{snapshot} to #{target}")
       run(['restore', snapshot, '--target', target])
+    end
+
+    def self.environment_for(config)
+      config.env.each_with_object({}) do |(key, value), env|
+        env[key] = value if key.to_s.match?(RESTIC_ENV_PATTERN)
+      end
     end
 
     private
@@ -311,9 +317,7 @@ module KamalBackup
     end
 
     def restic_env
-      config.env.each_with_object({}) do |(key, value), env|
-        env[key] = value if key.to_s.match?(RESTIC_ENV_PATTERN)
-      end
+      self.class.environment_for(config)
     end
 
     def pipe_commands(producer, consumer, producer_label:, consumer_label:)

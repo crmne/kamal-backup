@@ -103,15 +103,17 @@ module KamalBackup
     def locate_database_dump(snapshot: 'latest', database_name: nil, validate_credentials: true)
       if validate_credentials
         config.validate_restic
-        config.validate_database_backup
       else
         config.required_app_name
         unless config.restic_repository || config.restic_repository_file
           raise ConfigurationError,
                 'RESTIC_REPOSITORY or RESTIC_REPOSITORY_FILE is required to dump from the backup accessory'
         end
-        raise ConfigurationError, 'databases must contain at least one database' if databases.empty?
       end
+
+      # Dump reads a stored snapshot. It needs the selected database's name and
+      # adapter, not live connection secrets or the current SQLite file.
+      raise ConfigurationError, 'databases must contain at least one database' if databases.empty?
 
       adapter = select_database(database_name)
       resolved_snapshot = resolve_snapshot(snapshot, tags: database_snapshot_tags(adapter))
@@ -132,13 +134,18 @@ module KamalBackup
       }
     end
 
-    def dump_database(snapshot: 'latest', database_name: nil, output_path: nil, io: nil)
+    def dump_database(snapshot: 'latest', database_name: nil, output_path: nil, io: nil, overwrite: false)
       located = locate_database_dump(snapshot: snapshot, database_name: database_name)
 
       if output_path
         expanded = require_dump_output_path!(output_path)
         warn_dump_extension!(expanded, located.fetch(:dump_extension))
-        restic.write_dump_to_path(located.fetch(:snapshot), located.fetch(:filename), expanded)
+        restic.write_dump_to_path(
+          located.fetch(:snapshot),
+          located.fetch(:filename),
+          expanded,
+          overwrite: overwrite
+        )
         located.merge(output: expanded)
       elsif io
         restic.pipe_dump_to_io(located.fetch(:snapshot), located.fetch(:filename), io)
