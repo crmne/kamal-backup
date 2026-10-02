@@ -1524,7 +1524,7 @@ class CLITest < Minitest::Test
 
       Dir.chdir(dir) do
         capture_io do
-          KamalBackup::CLI.start(['run-restic', 'snapshots', '--json'], env: {})
+          KamalBackup::CLI.start(['run-restic', '--', 'snapshots', '--json'], env: {})
         end
         help, = capture_io do
           KamalBackup::CLI.start(['help'])

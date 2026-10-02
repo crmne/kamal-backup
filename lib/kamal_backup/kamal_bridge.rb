@@ -188,7 +188,7 @@ module KamalBackup
       message =
         if dump_context && stderr.to_s.match?(/no matching ID found|failed to find snapshot|no snapshot found/i)
           "backup not found for snapshot #{snapshot.inspect}"
-        elsif dump_context && stderr.to_s.match?(/path .+ not found|does not exist|no such file/i)
+        elsif dump_context && missing_requested_dump_file?(stderr, filename)
           "backup file #{filename.inspect} not found in snapshot #{snapshot.inspect}"
         else
           "command failed (#{status}): #{redacted_restic_command(spec, docker_argv)}\n#{redacted}"
@@ -202,8 +202,19 @@ module KamalBackup
       )
     end
 
-    # Shell-escaping hides query credentials from a later redactor pass, including
-    # ProxyCommand URLs. Redact each argument first, then escape that copy.
+    # A missing password file or repository file also says "no such file". Only
+    # the requested dump path is a missing backup.
+    def missing_requested_dump_file?(stderr, filename)
+      text = stderr.to_s
+      return false unless text.match?(/not found|does not exist|no such file/i)
+
+      [filename.to_s, filename.to_s.sub(%r{\A/+}, '')].uniq.reject(&:empty?).any? do |path|
+        text.include?(path)
+      end
+    end
+
+    # Shell-escaping hides query credentials from a later redactor pass.
+    # Redact each argument first, then escape that copy.
     def redacted_restic_command(spec, docker_argv)
       return spec.display(@redactor) unless docker_argv
 
@@ -221,7 +232,7 @@ module KamalBackup
       Array(options[:keys]).each { |key| argv.concat(['-i', key]) }
       identity_files.each { |path| argv.concat(['-i', path]) }
       argv.concat(['-o', 'IdentitiesOnly=yes']) if options[:keys_only]
-      argv.concat(['-F', '/dev/null']) if options[:config] == false
+      argv.concat(['-F', '/dev/null']) if options[:config] == false && config_file.nil?
       argv.concat(['-F', config_file]) if config_file
       case options[:forward_agent]
       when true
@@ -257,16 +268,10 @@ module KamalBackup
 
     def ssh_proxy_args(proxy)
       return [] if proxy.nil? || proxy == false
+      return [] unless (jump = ssh_jump_target(proxy))
 
-      if (jump = ssh_jump_target(proxy))
-        jump = "root@#{jump}" unless jump.include?('@') || jump.include?(',')
-        return ['-J', jump]
-      end
-
-      command = ssh_proxy_command(proxy)
-      return [] if command.nil? || command.empty?
-
-      ['-o', "ProxyCommand=#{command}"]
+      jump = "root@#{jump}" unless jump.include?('@') || jump.include?(',')
+      ['-J', jump]
     end
 
     def ssh_jump_target(proxy)
@@ -292,7 +297,7 @@ module KamalBackup
               fetch(proxy, :command_line_template) || fetch(proxy, :command)
             end
       value = raw.to_s.strip
-      return if value.empty? || !value.include?(' ')
+      return if value.empty?
 
       value
     end
@@ -317,6 +322,34 @@ module KamalBackup
     end
 
     def ssh_config_file
+      lines = []
+      # First value wins. Keep ProxyCommand ahead of Include so a credential in
+      # the deploy config is not replaced by a later file, and so it never
+      # appears in the ssh process arguments.
+      if (command = ssh_proxy_directive)
+        raise ConfigurationError, 'SSH proxy command cannot contain a newline' if command.match?(/[\r\n]/)
+
+        lines << "ProxyCommand #{command}"
+      end
+      lines.concat(ssh_config_include_lines)
+      return if lines.empty?
+
+      file = Tempfile.new(['kamal-backup-ssh-config-', '.conf'])
+      file.chmod(0o600)
+      file.write("#{lines.join("\n")}\n")
+      file.close
+      file
+    end
+
+    def ssh_proxy_directive
+      proxy = ssh_options[:proxy]
+      return if proxy.nil? || proxy == false
+      return if ssh_jump_target(proxy)
+
+      ssh_proxy_command(proxy)
+    end
+
+    def ssh_config_include_lines
       paths = case ssh_options[:config]
               when String
                 [ssh_options[:config]]
@@ -325,15 +358,10 @@ module KamalBackup
               else
                 []
               end
-      paths = paths.map { |path| File.expand_path(path) }.reject(&:empty?)
-      return if paths.empty?
 
-      file = Tempfile.new(['kamal-backup-ssh-config-', '.conf'])
-      file.chmod(0o600)
-      file.write(paths.map { |path| %(Include "#{path.gsub(/["\\]/) { |char| "\\#{char}" }}") }.join("\n"))
-      file.write("\n")
-      file.close
-      file
+      paths.map { |path| File.expand_path(path) }.reject(&:empty?).map do |path|
+        %(Include "#{path.gsub(/["\\]/) { |char| "\\#{char}" }}")
+      end
     end
 
     def config

@@ -213,4 +213,149 @@ class IntegrationSqliteResticTest < Minitest::Test
       assert_nil restic.latest_snapshot(tags: ['type:database', 'database:app', 'adapter:mysql'])
     end
   end
+
+  def test_dump_downloads_sqlite_bytes_from_latest_and_an_older_files_snapshot
+    skip 'set KAMAL_BACKUP_RUN_INTEGRATION=1 to run restic integration tests' unless ENV['KAMAL_BACKUP_RUN_INTEGRATION'] == '1'
+    skip 'sqlite3 is required' unless system('which', 'sqlite3', out: File::NULL)
+    skip 'restic is required' unless system('which', 'restic', out: File::NULL)
+
+    Dir.mktmpdir do |dir|
+      db = File.join(dir, 'app.sqlite3')
+      files = File.join(dir, 'files')
+      FileUtils.mkdir_p(files)
+      File.write(File.join(files, 'hello.txt'), 'first')
+      system(
+        'sqlite3', db,
+        "CREATE TABLE items (name text, payload blob); INSERT INTO items VALUES ('first', x'000102ff');",
+        exception: true
+      )
+      env = base_env(
+        'APP_NAME' => 'integration',
+        'DATABASE_ADAPTER' => 'sqlite',
+        'SQLITE_DATABASE_PATH' => db,
+        'BACKUP_PATHS' => files,
+        'RESTIC_REPOSITORY' => File.join(dir, 'repo'),
+        'RESTIC_PASSWORD' => 'integration-secret',
+        'RESTIC_INIT_IF_MISSING' => 'true',
+        'KAMAL_BACKUP_STATE_DIR' => File.join(dir, 'state')
+      )
+
+      first_files_snapshot = KamalBackup::App.new(env: env).backup(force: true).fetch(:files).fetch(:snapshot)
+      system('sqlite3', db, "UPDATE items SET name = 'second', payload = x'0a0b0c';", exception: true)
+      KamalBackup::App.new(env: env).backup(force: true)
+      FileUtils.rm_f(db)
+
+      latest = File.join(dir, 'latest.sqlite3')
+      older = File.join(dir, 'older.sqlite3')
+      KamalBackup::App.new(env: env).dump_database(snapshot: 'latest', output_path: latest)
+      KamalBackup::App.new(env: env).dump_database(snapshot: first_files_snapshot, output_path: older)
+
+      assert_equal 'second', sqlite_scalar(latest, 'SELECT name FROM items')
+      assert_equal '0A0B0C', sqlite_scalar(latest, 'SELECT hex(payload) FROM items')
+      assert_equal 'first', sqlite_scalar(older, 'SELECT name FROM items')
+      assert_equal '000102FF', sqlite_scalar(older, 'SELECT hex(payload) FROM items')
+      refute_path_exists db
+    end
+  end
+
+  def test_accessory_run_restic_dumps_mounted_yaml_and_a_failure_publishes_nothing
+    skip 'set KAMAL_BACKUP_RUN_INTEGRATION=1 to run restic integration tests' unless ENV['KAMAL_BACKUP_RUN_INTEGRATION'] == '1'
+    skip 'sqlite3 is required' unless system('which', 'sqlite3', out: File::NULL)
+    skip 'restic is required' unless system('which', 'restic', out: File::NULL)
+
+    Dir.mktmpdir do |dir|
+      db = File.join(dir, 'app.sqlite3')
+      repo = File.join(dir, 'repo')
+      system(
+        'sqlite3', db,
+        "CREATE TABLE items (name text, payload blob); INSERT INTO items VALUES ('stored', x'000102ff');",
+        exception: true
+      )
+      env = base_env(
+        'APP_NAME' => 'integration',
+        'DATABASE_ADAPTER' => 'sqlite',
+        'SQLITE_DATABASE_PATH' => db,
+        'BACKUP_PATHS' => '',
+        'RESTIC_REPOSITORY' => repo,
+        'RESTIC_PASSWORD' => 'integration-secret',
+        'RESTIC_INIT_IF_MISSING' => 'true',
+        'KAMAL_BACKUP_STATE_DIR' => File.join(dir, 'state')
+      )
+      app = KamalBackup::App.new(env: env)
+      app.backup(force: true)
+      located = app.locate_database_dump(snapshot: 'latest')
+      FileUtils.rm_f(db)
+
+      config_dir = File.join(dir, 'config')
+      FileUtils.mkdir_p(config_dir)
+      File.write(
+        File.join(config_dir, 'kamal-backup.yml'),
+        <<~YAML
+          app: integration
+          databases:
+            - name: app
+              adapter: sqlite
+              path: #{db}
+          restic:
+            repository: #{repo}
+            password: integration-secret
+        YAML
+      )
+      published = File.join(dir, 'published.sqlite3')
+      KamalBackup::App.new(env: env).dump_database(snapshot: 'latest', output_path: published)
+
+      stdout, status = Open3.capture2(
+        yaml_only_env,
+        RbConfig.ruby, '-I', lib_dir, '-e', 'require "kamal_backup"; KamalBackup::CLI.start(ARGV)',
+        'run-restic', '--', 'dump', located.fetch(:snapshot), located.fetch(:filename),
+        chdir: dir
+      )
+      assert_equal true, status.success?, stdout
+      stdout = stdout.dup.force_encoding(Encoding::ASCII_8BIT)
+      assert_equal File.binread(published), stdout
+      assert_equal '000102FF', sqlite_scalar(published, 'SELECT hex(payload) FROM items')
+
+      _failed_out, failed_err, failed = Open3.capture3(
+        yaml_only_env,
+        RbConfig.ruby, '-I', lib_dir, '-e', 'require "kamal_backup"; KamalBackup::CLI.start(ARGV)',
+        'run-restic', '--', 'dump', 'does-not-exist', located.fetch(:filename),
+        chdir: dir
+      )
+      refute failed.success?
+      refute_includes failed_err, 'integration-secret'
+
+      partial = File.join(dir, 'partial.sqlite3')
+      Dir.chdir(dir) do
+        capture_io do
+          error = assert_raises(SystemExit) do
+            KamalBackup::CLI.start(['dump', 'does-not-exist', '-o', partial], env: env)
+          end
+          assert_equal 1, error.status
+        end
+      end
+      refute_path_exists partial
+      assert_empty Dir.glob("#{partial}*")
+    end
+  end
+
+  def sqlite_scalar(db, sql)
+    output, status = Open3.capture2('sqlite3', db, sql)
+    flunk(output) unless status.success?
+
+    output.strip
+  end
+
+  def lib_dir
+    File.expand_path('../lib', __dir__)
+  end
+
+  def yaml_only_env
+    ENV.to_h.merge(
+      'RESTIC_REPOSITORY' => nil,
+      'RESTIC_PASSWORD' => nil,
+      'RESTIC_REPOSITORY_FILE' => nil,
+      'RESTIC_PASSWORD_FILE' => nil,
+      'RESTIC_PASSWORD_COMMAND' => nil
+    )
+  end
 end

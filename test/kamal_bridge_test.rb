@@ -757,11 +757,16 @@ class KamalBridgeTest < Minitest::Test
 
     assert_equal ['-J', 'root@bastion'], bridge.send(:ssh_proxy_args, jump)
     assert_equal ['-J', 'root@host'], bridge.send(:ssh_proxy_args, 'host')
-    assert_equal ['-o', 'ProxyCommand=ssh -W %h:%p user@proxy'], bridge.send(:ssh_proxy_args, command)
-    assert_equal ['-o', 'ProxyCommand=ssh -W %h:%p user@proxy'], bridge.send(:ssh_proxy_args, 'ssh -W %h:%p user@proxy')
-    assert_equal ['-o', 'ProxyCommand=ssh -W %h:%p jump'], bridge.send(:ssh_proxy_args, { 'command' => 'ssh -W %h:%p jump' })
-    assert_equal [], bridge.send(:ssh_proxy_args, '   ')
-    assert_equal [], bridge.send(:ssh_proxy_args, { 'command' => '' })
+    assert_equal [], bridge.send(:ssh_proxy_args, command)
+    assert_equal [], bridge.send(:ssh_proxy_args, 'ssh -W %h:%p user@proxy')
+    assert_equal [], bridge.send(:ssh_proxy_args, { 'command' => 'ssh -W %h:%p jump' })
+    assert_equal [], bridge.send(:ssh_proxy_args, { 'command' => '/usr/local/bin/tunnel-wrapper' })
+    assert_equal 'ssh -W %h:%p user@proxy', bridge.send(:ssh_proxy_command, command)
+    assert_equal 'ssh -W %h:%p user@proxy', bridge.send(:ssh_proxy_command, 'ssh -W %h:%p user@proxy')
+    assert_equal '/usr/local/bin/tunnel-wrapper', bridge.send(:ssh_proxy_command, { 'command' => '/usr/local/bin/tunnel-wrapper' })
+    assert_nil bridge.send(:ssh_proxy_command, '   ')
+    assert_nil bridge.send(:ssh_proxy_command, { 'command' => '' })
+    assert_nil bridge.send(:ssh_proxy_command, { 'command' => '   ' })
   end
 
   def test_ssh_argv_enables_agent_forwarding_and_multiple_config_files
@@ -1114,10 +1119,97 @@ class KamalBridgeTest < Minitest::Test
     end
   end
 
-  def test_accessory_restic_redacts_proxy_command_credentials
+  def test_proxy_command_is_kept_in_a_private_ssh_config
+    bridge = KamalBackup::KamalBridge.new(redactor: KamalBackup::Redactor.new(env: {}))
+    bridge.instance_variable_set(
+      :@config,
+      { 'ssh_options' => { 'config' => false, 'proxy' => { 'command' => '/usr/local/bin/tunnel-wrapper' } } }
+    )
+    file = bridge.send(:ssh_config_file)
+
+    assert_equal "ProxyCommand /usr/local/bin/tunnel-wrapper\n", File.read(file.path)
+    assert_equal 0o600, File.stat(file.path).mode & 0o777
+    argv = bridge.send(:ssh_argv, 'example.com', 'true', identity_files: [], config_file: file.path)
+    assert_includes argv, file.path
+    refute_includes argv, '/dev/null'
+    refute_includes argv.join("\n"), 'tunnel-wrapper'
+
+    jump = KamalBackup::KamalBridge.new(redactor: KamalBackup::Redactor.new(env: {}))
+    jump.instance_variable_set(:@config, { 'ssh_options' => { 'proxy' => 'bastion.example' } })
+    assert_nil jump.send(:ssh_config_file)
+    assert_equal ['-J', 'root@bastion.example'], jump.send(:ssh_proxy_args, 'bastion.example')
+  ensure
+    file&.close!
+  end
+
+  def test_accessory_restic_keeps_proxy_credentials_out_of_the_process_and_the_error
+    Dir.mktmpdir do |outer|
+      args_file = File.join(outer, 'ssh-args')
+      config_copy = File.join(outer, 'ssh-config')
+      command = 'sh -c curl https://proxy.example/connect?token=proxy-secret-value'
+
+      with_fake_ssh(<<~SCRIPT) do
+        #!/bin/sh
+        printf '%s\\n' "$@" > #{args_file}
+        config=
+        prev=
+        for arg in "$@"; do
+          if [ "$prev" = "-F" ]; then
+            config=$arg
+          fi
+          prev=$arg
+        done
+        cp "$config" #{config_copy}
+        echo 'ssh failed while running #{command}' >&2
+        exit 1
+      SCRIPT
+        Dir.mktmpdir do |dir|
+          bridge = KamalBackup::KamalBridge.new(redactor: KamalBackup::Redactor.new(env: {}), cwd: dir)
+          bridge.instance_variable_set(
+            :@config,
+            {
+              'service' => 'demo',
+              'ssh_options' => { 'proxy' => { 'command' => command } },
+              'accessories' => {
+                'backup' => {
+                  'host' => 'example.com',
+                  'service' => 'demo-backup'
+                }
+              }
+            }
+          )
+
+          error = assert_raises(KamalBackup::CommandError) do
+            bridge.stream_restic_dump(
+              accessory_name: 'backup',
+              repository: 's3:https://s3.example.com/bucket?token=repo-token-value',
+              snapshot: 'latest',
+              filename: '/databases/demo/app/postgres.pgdump',
+              io: StringIO.new
+            )
+          end
+
+          args = File.read(args_file)
+          config_path = args.split("\n")[args.split("\n").index('-F') + 1]
+          refute_includes args, 'proxy-secret-value'
+          refute_includes args, 'repo-token-value'
+          refute_includes error.message, 'proxy-secret-value'
+          refute_includes error.message, 'repo-token-value'
+          refute_includes error.command.argv.join("\n"), 'proxy-secret-value'
+          refute_includes error.command.argv.join("\n"), 'repo-token-value'
+          assert_includes error.message, 'REDACTED'
+          assert_includes File.read(config_copy), "ProxyCommand #{command}"
+          refute File.exist?(config_path)
+        end
+      end
+    end
+  end
+
+  def test_stream_restic_dump_does_not_report_a_missing_password_file_as_a_missing_dump
     with_fake_ssh(<<~SCRIPT) do
       #!/bin/sh
-      echo 'ssh: connect failed' >&2
+      echo 'open /run/secrets/restic-password: no such file or directory' >&2
+      echo 'open /run/secrets/restic-repository: no such file or directory' >&2
       exit 1
     SCRIPT
       Dir.mktmpdir do |dir|
@@ -1126,11 +1218,6 @@ class KamalBridgeTest < Minitest::Test
           :@config,
           {
             'service' => 'demo',
-            'ssh_options' => {
-              'proxy' => {
-                'command' => 'sh -c curl https://proxy.example/connect?token=proxy-secret-value'
-              }
-            },
             'accessories' => {
               'backup' => {
                 'host' => 'example.com',
@@ -1143,16 +1230,17 @@ class KamalBridgeTest < Minitest::Test
         error = assert_raises(KamalBackup::CommandError) do
           bridge.stream_restic_dump(
             accessory_name: 'backup',
-            repository: 's3:https://s3.example.com/bucket?token=repo-token-value',
+            repository: '/var/lib/restic-repo',
             snapshot: 'latest',
             filename: '/databases/demo/app/postgres.pgdump',
             io: StringIO.new
           )
         end
 
-        refute_includes error.message, 'proxy-secret-value'
-        refute_includes error.message, 'repo-token-value'
-        assert_includes error.message, 'REDACTED'
+        assert_includes error.message, 'command failed (1)'
+        assert_includes error.message, '/run/secrets/restic-password'
+        assert_includes error.message, '/run/secrets/restic-repository'
+        refute_includes error.message, 'backup file'
       end
     end
   end
