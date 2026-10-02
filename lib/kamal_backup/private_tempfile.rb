@@ -10,6 +10,7 @@ module KamalBackup
   # inherits the process umask.
   class PrivateTempfile
     MODE = 0o600
+    UNSUPPORTED_LINK_ERRORS = [Errno::EPERM, Errno::ENOTSUP, Errno::EOPNOTSUPP, Errno::EXDEV].uniq.freeze
 
     def self.open(target_path)
       directory = File.dirname(target_path)
@@ -47,7 +48,34 @@ module KamalBackup
       File.unlink(source)
     rescue Errno::EEXIST
       raise ConfigurationError, "output file already exists: #{target_path}; pass --yes to overwrite"
+    rescue *UNSUPPORTED_LINK_ERRORS
+      copy_exclusively(source, target_path)
     end
-    private_class_method :link_exclusively
+
+    # Exclusive create still refuses a name that appeared during the download.
+    # A failed copy removes that new file so a partial dump is not left behind.
+    def self.copy_exclusively(source, target_path)
+      created = false
+      copied = false
+      File.open(target_path, File::WRONLY | File::CREAT | File::EXCL | File::BINARY, MODE) do |out|
+        created = true
+        out.chmod(MODE)
+        File.open(source, File::RDONLY | File::BINARY) { |input| IO.copy_stream(input, out) }
+        copied = true
+      end
+      File.unlink(source)
+    rescue Errno::EEXIST
+      raise ConfigurationError, "output file already exists: #{target_path}; pass --yes to overwrite"
+    rescue StandardError
+      remove_partial_copy(target_path) if created && !copied
+      raise
+    end
+
+    def self.remove_partial_copy(path)
+      File.unlink(path)
+    rescue Errno::ENOENT
+      nil
+    end
+    private_class_method :link_exclusively, :copy_exclusively, :remove_partial_copy
   end
 end
