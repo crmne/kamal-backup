@@ -1264,6 +1264,45 @@ class KamalBridgeTest < Minitest::Test
     end
   end
 
+  def test_quoted_proxy_tokens_are_redacted_when_stderr_prints_only_the_secret
+    cases = [
+      ["tunnel-wrapper --token 'single-secret-value'", 'single-secret-value'],
+      ['tunnel-wrapper --token "double-secret-value"', 'double-secret-value'],
+      ["tunnel-wrapper --token 'proxy secret value'", 'proxy secret value'],
+      [%(sh -c "tunnel-wrapper --token 'nested-secret-value'"), 'nested-secret-value'],
+      ["tunnel-wrapper --token 'unclosed-secret-value", 'unclosed-secret-value']
+    ]
+
+    cases.each do |command, secret|
+      assert_proxy_token_redacted(command, secret)
+    end
+  end
+
+  def test_credential_values_drop_shell_quotes_around_proxy_tokens
+    bridge = KamalBackup::KamalBridge.new(redactor: KamalBackup::Redactor.new(env: {}))
+    cases = {
+      "tunnel-wrapper --token 'single-secret-value'" => 'single-secret-value',
+      'tunnel-wrapper --token "double-secret-value"' => 'double-secret-value',
+      "tunnel-wrapper --token 'proxy secret value'" => 'proxy secret value',
+      %(sh -c "tunnel-wrapper --token 'nested-secret-value'") => 'nested-secret-value',
+      "tunnel-wrapper --token 'unclosed-secret-value" => 'unclosed-secret-value',
+      's3:https://s3.example.com/bucket?auth=repo-auth-value&region=us-east-1' => 'repo-auth-value'
+    }
+
+    cases.each do |command, secret|
+      values = bridge.send(:credential_values_in, command)
+      assert_includes values, secret, command
+      refute_includes values, %('#{secret}'), command
+      refute_includes values, %("#{secret}"), command
+    end
+
+    repository = bridge.send(
+      :credential_values_in,
+      's3:https://s3.example.com/bucket?auth=repo-auth-value&region=us-east-1'
+    )
+    refute_includes repository, 'us-east-1'
+  end
+
   def test_proxy_only_ssh_config_includes_default_files
     Dir.mktmpdir do |dir|
       user_config = File.join(dir, 'user_config')
@@ -1378,6 +1417,46 @@ class KamalBridgeTest < Minitest::Test
         assert_includes error.message, '/run/secrets/restic-password'
         assert_includes error.message, '/run/secrets/restic-repository'
         refute_includes error.message, 'backup file'
+      end
+    end
+  end
+
+  def assert_proxy_token_redacted(command, secret)
+    with_fake_ssh(<<~SCRIPT) do
+      #!/bin/sh
+      printf '%s\\n' #{Shellwords.shellescape(secret)} >&2
+      exit 1
+    SCRIPT
+      Dir.mktmpdir do |dir|
+        bridge = KamalBackup::KamalBridge.new(redactor: KamalBackup::Redactor.new(env: {}), cwd: dir)
+        bridge.instance_variable_set(
+          :@config,
+          {
+            'service' => 'demo',
+            'ssh_options' => { 'proxy' => { 'command' => command } },
+            'accessories' => {
+              'backup' => {
+                'host' => 'example.com',
+                'service' => 'demo-backup'
+              }
+            }
+          }
+        )
+
+        error = assert_raises(KamalBackup::CommandError, command) do
+          bridge.stream_restic_dump(
+            accessory_name: 'backup',
+            repository: '/var/lib/restic-repo',
+            snapshot: 'latest',
+            filename: '/databases/demo/app/postgres.pgdump',
+            io: StringIO.new
+          )
+        end
+
+        refute_includes error.message, secret, command
+        refute_includes error.stderr, secret, command
+        assert_includes error.stderr, '[REDACTED]', command
+        refute_includes error.command.argv.join("\n"), secret, command
       end
     end
   end

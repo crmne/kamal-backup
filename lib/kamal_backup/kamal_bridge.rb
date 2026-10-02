@@ -240,15 +240,98 @@ module KamalBackup
       text = source.to_s
       return [] if text.strip.empty?
 
+      url_credential_values(text) + option_credential_values(text)
+    end
+
+    def url_credential_values(text)
       values = []
       text.scan(%r{://[^/\s@:]+:([^/\s@]+)@}) { values << Regexp.last_match(1) }
       text.scan(/[?&]([A-Za-z0-9][\w.-]*)=([^&#\s]+)/) do |key, value|
         values << value if key.match?(CREDENTIAL_KEY_PATTERN)
       end
-      text.scan(/--([A-Za-z0-9][\w-]*)(?:=|\s+)(\S+)/) do |key, value|
-        values << value if key.match?(CREDENTIAL_KEY_PATTERN)
+      values
+    end
+
+    # Shellwords removes quotes, so --token 'secret' and --token "secret" register
+    # the secret itself. A nested sh -c command is parsed again. A broken quote
+    # must not raise while an error is being reported.
+    def option_credential_values(text, depth: 0)
+      return [] if depth > 4 || text.strip.empty?
+
+      words = split_proxy_command(text)
+      values = []
+      words.each_with_index do |word, index|
+        values.concat(option_values_at(words, word, index))
+        values.concat(url_credential_values(word)) if word.match?(%r{://|[?&][\w.-]+=})
+        next if word == text || !word.match?(/--/) || !word.match?(/[\s'"]/)
+
+        values.concat(option_credential_values(word, depth: depth + 1))
       end
       values
+    end
+
+    def option_values_at(words, word, index)
+      if (assignment = word.match(/\A--([A-Za-z0-9][\w-]*)=(.*)\z/m))
+        return [] unless assignment[1].match?(CREDENTIAL_KEY_PATTERN)
+
+        value = assignment[2]
+        return value.empty? ? [] : [value]
+      end
+
+      flag = word.match(/\A--([A-Za-z0-9][\w-]*)\z/)
+      return [] unless flag && flag[1].match?(CREDENTIAL_KEY_PATTERN)
+
+      value = words[index + 1]
+      return [] if value.nil? || value.empty? || value.start_with?('-')
+
+      [value]
+    end
+
+    def split_proxy_command(text)
+      Shellwords.split(text)
+    rescue ArgumentError
+      lenient_shell_split(text)
+    end
+
+    def lenient_shell_split(text)
+      words = []
+      word = +''
+      quoted = nil
+      started = false
+      index = 0
+      while index < text.length
+        char = text[index]
+        if quoted
+          if char == quoted
+            quoted = nil
+          elsif quoted == '"' && char == '\\' && index + 1 < text.length
+            index += 1
+            word << text[index]
+          else
+            word << char
+          end
+          started = true
+        elsif char == '\\' && index + 1 < text.length
+          index += 1
+          word << text[index]
+          started = true
+        elsif ["'", '"'].include?(char)
+          quoted = char
+          started = true
+        elsif char.match?(/\s/)
+          if started
+            words << word
+            word = +''
+            started = false
+          end
+        else
+          word << char
+          started = true
+        end
+        index += 1
+      end
+      words << word if started
+      words
     end
 
     # Match Kamal's SSH defaults: user root, port 22, plus ssh.user, port, proxy,
