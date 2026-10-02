@@ -13,6 +13,9 @@ module KamalBackup
 
     DEFAULT_CONFIG_FILE = 'config/deploy.yml'
     VERSION_LINE_PATTERN = /\A\d+(?:\.\d+)+(?:[-.][A-Za-z0-9]+)*\z/
+    # Query keys such as auth are credentials even when the URL pattern does not
+    # name them. A diagnostic that prints only the value still has to be redacted.
+    CREDENTIAL_KEY_PATTERN = /(?:pass|password|secret|token|key|credential|authorization)|(?:\A|_)(?:auth|pwd)(?:\z|_)/i
 
     class FilteringIO
       def initialize(io, &reject)
@@ -163,7 +166,8 @@ module KamalBackup
               err,
               snapshot: snapshot,
               filename: filename,
-              docker_argv: docker_argv
+              docker_argv: docker_argv,
+              redactor: diagnostic_redactor(repository)
             )
           end
         end
@@ -182,8 +186,9 @@ module KamalBackup
       command
     end
 
-    def raise_restic_accessory_error(spec, status, stderr, snapshot:, filename:, docker_argv: nil)
-      redacted = @redactor.redact_string(stderr.to_s)
+    def raise_restic_accessory_error(spec, status, stderr, snapshot:, filename:, docker_argv: nil, redactor: nil)
+      reporter = redactor || @redactor
+      redacted = reporter.redact_string(stderr.to_s)
       dump_context = snapshot && filename
       message =
         if dump_context && stderr.to_s.match?(/no matching ID found|failed to find snapshot|no snapshot found/i)
@@ -191,7 +196,7 @@ module KamalBackup
         elsif dump_context && missing_requested_dump_file?(stderr, filename)
           "backup file #{filename.inspect} not found in snapshot #{snapshot.inspect}"
         else
-          "command failed (#{status}): #{redacted_restic_command(spec, docker_argv)}\n#{redacted}"
+          "command failed (#{status}): #{redacted_restic_command(spec, docker_argv, reporter)}\n#{redacted}"
         end
 
       raise CommandError.new(
@@ -215,19 +220,43 @@ module KamalBackup
 
     # Shell-escaping hides query credentials from a later redactor pass.
     # Redact each argument first, then escape that copy.
-    def redacted_restic_command(spec, docker_argv)
-      return spec.display(@redactor) unless docker_argv
+    def redacted_restic_command(spec, docker_argv, redactor)
+      return spec.display(redactor) unless docker_argv
 
-      prefix = spec.argv[0..-2].map { |arg| @redactor.redact_string(arg) }.shelljoin
-      remote = docker_argv.map { |arg| @redactor.redact_string(arg) }.shelljoin
+      prefix = spec.argv[0..-2].map { |arg| redactor.redact_string(arg) }.shelljoin
+      remote = docker_argv.map { |arg| redactor.redact_string(arg) }.shelljoin
       "#{prefix} #{remote}"
     end
 
+    def diagnostic_redactor(repository)
+      @redactor.with_additional_secrets(configured_credential_values(repository))
+    end
+
+    def configured_credential_values(repository)
+      [repository, ssh_proxy_command(ssh_options[:proxy])].flat_map { |source| credential_values_in(source) }
+    end
+
+    def credential_values_in(source)
+      text = source.to_s
+      return [] if text.strip.empty?
+
+      values = []
+      text.scan(%r{://[^/\s@:]+:([^/\s@]+)@}) { values << Regexp.last_match(1) }
+      text.scan(/[?&]([A-Za-z0-9][\w.-]*)=([^&#\s]+)/) do |key, value|
+        values << value if key.match?(CREDENTIAL_KEY_PATTERN)
+      end
+      text.scan(/--([A-Za-z0-9][\w-]*)(?:=|\s+)(\S+)/) do |key, value|
+        values << value if key.match?(CREDENTIAL_KEY_PATTERN)
+      end
+      values
+    end
+
     # Match Kamal's SSH defaults: user root, port 22, plus ssh.user, port, proxy,
-    # keys, and config from the rendered deploy config.
+    # keys, and config from the rendered deploy config. -T overrides RequestTTY
+    # force so a config file cannot translate dump bytes or merge stderr into stdout.
     def ssh_argv(host, remote_command, identity_files:, config_file:)
       options = ssh_options
-      argv = ['ssh', '-p', options.fetch(:port), '-l', options.fetch(:user)]
+      argv = ['ssh', '-T', '-p', options.fetch(:port), '-l', options.fetch(:user)]
       argv.concat(ssh_proxy_args(options[:proxy]))
       Array(options[:keys]).each { |key| argv.concat(['-i', key]) }
       identity_files.each { |path| argv.concat(['-i', path]) }
@@ -350,18 +379,34 @@ module KamalBackup
     end
 
     def ssh_config_include_lines
-      paths = case ssh_options[:config]
-              when String
-                [ssh_options[:config]]
-              when Array
-                ssh_options[:config].map(&:to_s)
-              else
-                []
-              end
+      paths = explicit_ssh_config_paths
+      # -F hides the files OpenSSH would read on its own. Put them back when the
+      # deploy config left ssh.config on and the only reason for -F is the proxy.
+      paths = default_ssh_config_paths if paths.empty? && ssh_options[:config] != false && ssh_proxy_directive
 
       paths.map { |path| File.expand_path(path) }.reject(&:empty?).map do |path|
         %(Include "#{path.gsub(/["\\]/) { |char| "\\#{char}" }}")
       end
+    end
+
+    def explicit_ssh_config_paths
+      case ssh_options[:config]
+      when String
+        [ssh_options[:config]]
+      when Array
+        ssh_options[:config].map(&:to_s)
+      else
+        []
+      end
+    end
+
+    def default_ssh_config_paths
+      home = ENV.fetch('HOME', '').to_s
+      candidates = []
+      candidates << File.join(home, '.ssh', 'config') unless home.empty?
+      candidates << '/etc/ssh/ssh_config'
+      candidates << '/etc/ssh_config'
+      candidates.select { |path| File.file?(path) }
     end
 
     def config

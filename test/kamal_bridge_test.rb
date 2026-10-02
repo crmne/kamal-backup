@@ -612,29 +612,37 @@ class KamalBridgeTest < Minitest::Test
   end
 
   def test_capture_restic_command_returns_stdout
-    with_fake_ssh("#!/bin/sh\nshift\nprintf '[{\"id\":\"abc\"}]'\n") do
-      Dir.mktmpdir do |dir|
-        bridge = KamalBackup::KamalBridge.new(redactor: KamalBackup::Redactor.new(env: {}), cwd: dir)
-        bridge.instance_variable_set(
-          :@config,
-          {
-            'service' => 'demo',
-            'accessories' => {
-              'backup' => {
-                'host' => 'example.com',
-                'service' => 'demo-backup'
+    Dir.mktmpdir do |outer|
+      args_file = File.join(outer, 'ssh-args')
+      with_fake_ssh(<<~SCRIPT) do
+        #!/bin/sh
+        printf '%s\\n' "$@" > #{args_file}
+        printf '[{"id":"abc"}]'
+      SCRIPT
+        Dir.mktmpdir do |dir|
+          bridge = KamalBackup::KamalBridge.new(redactor: KamalBackup::Redactor.new(env: {}), cwd: dir)
+          bridge.instance_variable_set(
+            :@config,
+            {
+              'service' => 'demo',
+              'accessories' => {
+                'backup' => {
+                  'host' => 'example.com',
+                  'service' => 'demo-backup'
+                }
               }
             }
-          }
-        )
+          )
 
-        output = bridge.capture_restic_command(
-          accessory_name: 'backup',
-          repository: '/var/lib/restic-repo',
-          argv: ['snapshots', '--json']
-        )
+          output = bridge.capture_restic_command(
+            accessory_name: 'backup',
+            repository: '/var/lib/restic-repo',
+            argv: ['snapshots', '--json']
+          )
 
-        assert_equal '[{"id":"abc"}]', output
+          assert_equal '[{"id":"abc"}]', output
+          assert_includes File.read(args_file).split("\n"), '-T'
+        end
       end
     end
   end
@@ -840,6 +848,7 @@ class KamalBridgeTest < Minitest::Test
       end
 
       args = File.read(args_file).split("\n")
+      assert_includes args, '-T'
       assert_equal '22', args[args.index('-p') + 1]
       assert_equal 'root', args[args.index('-l') + 1]
     end
@@ -1202,6 +1211,134 @@ class KamalBridgeTest < Minitest::Test
           refute File.exist?(config_path)
         end
       end
+    end
+  end
+
+  def test_accessory_restic_redacts_bare_proxy_tokens_and_repository_query_secrets
+    command = 'tunnel-wrapper --token proxy-plain-token'
+    repository = 's3:https://s3.example.com/bucket?auth=repo-auth-value&region=us-east-1'
+
+    with_fake_ssh(<<~SCRIPT) do
+      #!/bin/sh
+      echo proxy-plain-token >&2
+      echo repo-auth-value >&2
+      echo 'tunnel-wrapper --token proxy-plain-token' >&2
+      echo 's3:https://s3.example.com/bucket?auth=repo-auth-value&region=us-east-1' >&2
+      exit 1
+    SCRIPT
+      Dir.mktmpdir do |dir|
+        bridge = KamalBackup::KamalBridge.new(redactor: KamalBackup::Redactor.new(env: {}), cwd: dir)
+        bridge.instance_variable_set(
+          :@config,
+          {
+            'service' => 'demo',
+            'ssh_options' => { 'proxy' => { 'command' => command } },
+            'accessories' => {
+              'backup' => {
+                'host' => 'example.com',
+                'service' => 'demo-backup'
+              }
+            }
+          }
+        )
+
+        error = assert_raises(KamalBackup::CommandError) do
+          bridge.stream_restic_dump(
+            accessory_name: 'backup',
+            repository: repository,
+            snapshot: 'latest',
+            filename: '/databases/demo/app/postgres.pgdump',
+            io: StringIO.new
+          )
+        end
+
+        refute_includes error.message, 'proxy-plain-token'
+        refute_includes error.message, 'repo-auth-value'
+        refute_includes error.stderr, 'proxy-plain-token'
+        refute_includes error.stderr, 'repo-auth-value'
+        assert_includes error.stderr, 'us-east-1'
+        assert_includes error.stderr, '[REDACTED]'
+        refute_includes error.command.argv.join("\n"), 'proxy-plain-token'
+        refute_includes error.command.argv.join("\n"), 'repo-auth-value'
+      end
+    end
+  end
+
+  def test_proxy_only_ssh_config_includes_default_files
+    Dir.mktmpdir do |dir|
+      user_config = File.join(dir, 'user_config')
+      explicit = File.join(dir, 'explicit_config')
+      File.write(user_config, "Host example\n  User deploy\n")
+      File.write(explicit, "Host *\n")
+      files = []
+      bridge = KamalBackup::KamalBridge.new(redactor: KamalBackup::Redactor.new(env: {}))
+      bridge.define_singleton_method(:default_ssh_config_paths) { [user_config] }
+
+      bridge.instance_variable_set(
+        :@config,
+        { 'ssh_options' => { 'proxy' => { 'command' => '/usr/local/bin/tunnel-wrapper' } } }
+      )
+      omitted = bridge.send(:ssh_config_file)
+      files << omitted
+      assert_equal <<~CONFIG, File.read(omitted.path)
+        ProxyCommand /usr/local/bin/tunnel-wrapper
+        Include "#{user_config}"
+      CONFIG
+
+      bridge.instance_variable_set(
+        :@config,
+        { 'ssh_options' => { 'config' => true, 'proxy' => { 'command' => '/usr/local/bin/tunnel-wrapper' } } }
+      )
+      enabled = bridge.send(:ssh_config_file)
+      files << enabled
+      assert_includes File.read(enabled.path), %(Include "#{user_config}")
+
+      bridge.instance_variable_set(
+        :@config,
+        { 'ssh_options' => { 'config' => false, 'proxy' => { 'command' => '/usr/local/bin/tunnel-wrapper' } } }
+      )
+      disabled = bridge.send(:ssh_config_file)
+      files << disabled
+      assert_equal "ProxyCommand /usr/local/bin/tunnel-wrapper\n", File.read(disabled.path)
+
+      bridge.instance_variable_set(
+        :@config,
+        {
+          'ssh_options' => {
+            'config' => explicit,
+            'proxy' => { 'command' => '/usr/local/bin/tunnel-wrapper' }
+          }
+        }
+      )
+      chosen = bridge.send(:ssh_config_file)
+      files << chosen
+      chosen_text = File.read(chosen.path)
+      assert_includes chosen_text, %(Include "#{explicit}")
+      refute_includes chosen_text, user_config
+    ensure
+      Array(files).each { |file| file.close! if file.respond_to?(:close!) }
+    end
+  end
+
+  def test_default_ssh_config_paths_skip_missing_files
+    bridge = KamalBackup::KamalBridge.new(redactor: KamalBackup::Redactor.new(env: {}))
+    original_home = ENV.fetch('HOME', nil)
+
+    Dir.mktmpdir do |home|
+      ENV['HOME'] = home
+      refute_includes bridge.send(:default_ssh_config_paths), File.join(home, '.ssh', 'config')
+
+      FileUtils.mkdir_p(File.join(home, '.ssh'))
+      File.write(File.join(home, '.ssh', 'config'), "Host *\n")
+      paths = bridge.send(:default_ssh_config_paths)
+      assert_includes paths, File.join(home, '.ssh', 'config')
+      paths.each { |path| assert File.file?(path) }
+    end
+  ensure
+    if original_home
+      ENV['HOME'] = original_home
+    else
+      ENV.delete('HOME')
     end
   end
 

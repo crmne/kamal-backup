@@ -32,6 +32,10 @@ module KamalBackup
       redacted
     end
 
+    def with_additional_secrets(values)
+      self.class.new(secret_values: @secret_values + Array(values), env: @env)
+    end
+
     private
 
     def known_secret_values
@@ -40,7 +44,8 @@ module KamalBackup
           values << value.to_s if key.to_s.match?(SECRET_KEY_PATTERN)
         end
 
-        (@secret_values + env_secrets).compact.uniq.reject { |value| value.empty? || value.length < 4 }
+        secrets = (@secret_values + env_secrets).compact.uniq
+        secrets.reject { |value| value.empty? || value.length < 4 }.sort_by { |value| -value.length }
       end
     end
 
