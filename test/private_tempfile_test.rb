@@ -125,6 +125,26 @@ class PrivateTempfileTest < Minitest::Test
     end
   end
 
+  def test_unsupported_link_removes_a_partial_copy_when_the_copy_is_interrupted
+    Dir.mktmpdir do |dir|
+      target = File.join(dir, 'database.dump')
+      file = KamalBackup::PrivateTempfile.open(target)
+      file.write('downloaded')
+
+      assert_raises(Interrupt) do
+        File.stub(:link, ->(*) { raise Errno::ENOTSUP }) do
+          IO.stub(:copy_stream, ->(*) { raise Interrupt }) do
+            KamalBackup::PrivateTempfile.publish(file, target, overwrite: false)
+          end
+        end
+      end
+
+      refute_path_exists target
+    ensure
+      KamalBackup::PrivateTempfile.discard(file)
+    end
+  end
+
   def test_discard_removes_an_unpublished_temp_file
     Dir.mktmpdir do |dir|
       target = File.join(dir, 'database.dump')

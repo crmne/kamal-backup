@@ -53,7 +53,9 @@ module KamalBackup
     end
 
     # Exclusive create still refuses a name that appeared during the download.
-    # A failed copy removes that new file so a partial dump is not left behind.
+    # A failed or interrupted copy removes that new file so a partial dump is not
+    # left behind. copied is set only after the file closes, so a close error is
+    # cleaned up too. Interrupt is not a StandardError, so this uses ensure.
     def self.copy_exclusively(source, target_path)
       created = false
       copied = false
@@ -61,14 +63,13 @@ module KamalBackup
         created = true
         out.chmod(MODE)
         File.open(source, File::RDONLY | File::BINARY) { |input| IO.copy_stream(input, out) }
-        copied = true
       end
+      copied = true
       File.unlink(source)
     rescue Errno::EEXIST
       raise ConfigurationError, "output file already exists: #{target_path}; pass --yes to overwrite"
-    rescue StandardError
+    ensure
       remove_partial_copy(target_path) if created && !copied
-      raise
     end
 
     def self.remove_partial_copy(path)
