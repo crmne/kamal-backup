@@ -37,6 +37,13 @@ module TestHelpers
       'BACKUP_PATHS' => '/tmp/files'
     }.merge(overrides)
   end
+
+  def with_umask(mask)
+    previous = File.umask(mask)
+    yield
+  ensure
+    File.umask(previous)
+  end
 end
 
 module Minitest

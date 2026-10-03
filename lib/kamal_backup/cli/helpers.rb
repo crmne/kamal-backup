@@ -5,6 +5,7 @@ require 'json'
 require 'shellwords'
 require 'thor'
 require_relative '../app'
+require_relative '../private_tempfile'
 require_relative '../command_output'
 require_relative '../config'
 require_relative '../kamal_bridge'
@@ -109,6 +110,103 @@ module KamalBackup
         print(result.stdout) unless result.streamed
         $stderr.print(result.stderr) if !result.streamed && !result.stderr.empty?
         result
+      end
+
+      def require_dump_output_path!(output_path)
+        path = output_path.to_s.strip
+        raise ConfigurationError, 'output path is required; pass -o PATH' if path.empty?
+        raise ConfigurationError, 'output path must be a file, not a directory' if path.end_with?('/', '\\')
+
+        expanded = File.expand_path(path)
+        raise ConfigurationError, "output path must be a file, not a directory: #{expanded}" if File.directory?(expanded)
+
+        parent = File.dirname(expanded)
+        raise ConfigurationError, "output path directory does not exist: #{parent}" unless File.directory?(parent)
+
+        expanded
+      end
+
+      def warn_dump_extension!(output_path, expected_extension)
+        expected = ".#{expected_extension}"
+        actual = File.extname(output_path.to_s)
+        return if actual.casecmp?(expected)
+
+        actual_label = actual.empty? ? 'no extension' : actual.inspect
+        warn("warning: output path has #{actual_label}; expected #{expected.inspect} for this database dump")
+      end
+
+      def dump_overwrite?(output_path)
+        return true if options[:yes]
+        return false unless File.exist?(output_path)
+
+        confirm!("Overwrite #{output_path}? This will replace the existing file.")
+        true
+      end
+
+      def dump_remote(snapshot, output_path:, overwrite:)
+        ensure_remote_version_match!
+        config = remote_dump_config
+        location = remote_restic_location(config)
+        located = remote_dump_app(config, location).locate_database_dump(
+          snapshot: snapshot,
+          database_name: options[:database],
+          validate_credentials: false
+        )
+        filename = located.fetch(:filename)
+        expanded = require_dump_output_path!(output_path)
+        warn_dump_extension!(expanded, located.fetch(:dump_extension))
+        temp = nil
+
+        begin
+          temp = PrivateTempfile.open(expanded)
+          bridge.stream_restic_dump(
+            accessory_name: accessory_name,
+            snapshot: located.fetch(:snapshot),
+            filename: filename,
+            io: temp,
+            **location
+          )
+          PrivateTempfile.publish(temp, expanded, overwrite: overwrite)
+          warn("wrote #{filename.sub(%r{\A/+}, '')} from snapshot #{located.fetch(:snapshot)} to #{expanded}")
+        ensure
+          PrivateTempfile.discard(temp)
+        end
+      end
+
+      def remote_dump_config
+        Config.new(
+          env: bridge.accessory_environment(accessory_name: accessory_name),
+          config_paths: [Config::SHARED_CONFIG_PATH],
+          load_project_defaults: false
+        )
+      end
+
+      def remote_restic_location(config)
+        if (repository = config.restic_repository)
+          { repository: repository }
+        elsif (repository_file = config.restic_repository_file)
+          { repository_file: repository_file }
+        else
+          raise ConfigurationError,
+                'RESTIC_REPOSITORY or RESTIC_REPOSITORY_FILE is required to dump from the backup accessory'
+        end
+      end
+
+      def remote_dump_app(config, location)
+        runner = lambda do |args, **|
+          stdout = bridge.capture_restic_command(
+            accessory_name: accessory_name,
+            argv: args,
+            **location
+          )
+          CommandResult.new(stdout: stdout, stderr: '', status: 0)
+        end
+
+        App.new(
+          config: config,
+          redactor: redactor,
+          restic: Restic.new(config, redactor: redactor, runner: runner)
+        )
       end
 
       def ensure_remote_version_match!
