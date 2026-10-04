@@ -144,13 +144,13 @@ Start here:
 
 ## Releasing
 
-Run the release helper from a clean `master` checkout:
+Commit hand-written release notes as `packaging/release-notes/vX.Y.Z.md`, then run the release helper from a clean `master` checkout:
 
 ```sh
 bin/release 1.0.1
 ```
 
-It updates `lib/kamal_backup/version.rb`, syncs `Gemfile.lock`, commits the release, and pushes `master`. CI runs the test suite and docs build, publishes the RubyGem and Docker image tags, then creates the version tag, GitHub release, and docs deployment from the release commit.
+It updates `lib/kamal_backup/version.rb`, syncs `Gemfile.lock`, commits the release, and pushes `master`. CI runs the test suite and docs build, publishes the RubyGem and Docker image tags, then creates the version tag, GitHub release, and docs deployment from the release commit. The GitHub release uses the committed notes, and CI stops before publishing anything when they are missing.
 
 Add `--no-push` to prepare the release commit locally without publishing.
 

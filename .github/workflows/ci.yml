@@ -157,6 +157,12 @@ jobs:
             release_ref=true
           fi
 
+          NOTES="packaging/release-notes/${TAG}.md"
+          if [ "$release_ref" = "true" ] && { [ "$version_changed" = "true" ] || [ "$tag_missing" = "true" ] || [ "$release_missing" = "true" ]; } && [ ! -s "$NOTES" ]; then
+            echo "::error::Release notes ${NOTES} are missing. Commit them before releasing ${TAG}."
+            exit 1
+          fi
+
           if [ "$release_ref" = "true" ] && { [ "$version_changed" = "true" ] || [ "$tag_missing" = "true" ]; }; then
             echo "publish_artifacts=true" >> "$GITHUB_OUTPUT"
           else
@@ -340,30 +346,9 @@ jobs:
             prerelease_args=(--prerelease)
           fi
 
-          previous_tag=$(git tag --sort=-v:refname --list 'v*' | awk -v current="$TAG" '$0 != current { print; exit }')
-          if [ -n "$previous_tag" ]; then
-            commit_range="${previous_tag}..${release_target}"
-          else
-            commit_range="${release_target}"
-          fi
-
-          commits=$(git log --reverse --format='* %H %s' "$commit_range" | grep -Ev '^\* [0-9a-f]+ (docs|test|chore):' || true)
-          if [ -z "$commits" ]; then
-            commits=$(git log --reverse --format='* %H %s' "$commit_range")
-          fi
-
-          {
-            echo "## Changelog"
-            echo "$commits"
-            if [ -n "$previous_tag" ]; then
-              echo
-              echo "**Full Changelog**: https://github.com/${GITHUB_REPOSITORY}/compare/${previous_tag}...${TAG}"
-            fi
-          } > release-notes.md
-
           gh release create "$TAG" \
             --target "$release_target" \
-            --notes-file release-notes.md \
+            --notes-file "packaging/release-notes/${TAG}.md" \
             "${prerelease_args[@]}"
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
