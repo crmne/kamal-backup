@@ -493,11 +493,27 @@ module KamalBackup
     end
 
     def config
-      @config ||= begin
-        result = capture_kamal(kamal_config_argv)
-        load_method = YAML.respond_to?(:unsafe_load) ? :unsafe_load : :load
-        YAML.public_send(load_method, result.stdout)
-      end
+      @config ||= load_kamal_config(capture_kamal(kamal_config_argv).stdout)
+    end
+
+    # kamal config renders ssh.proxy and ssh.proxy_command as Net::SSH::Proxy
+    # objects. kamal-backup does not load net-ssh, so read any object whose
+    # class is not loaded as a Hash of its instance variables.
+    def load_kamal_config(yaml)
+      document = Psych.parse_stream(yaml).children.first
+      return false unless document
+
+      document.each { |node| node.tag = nil if unloaded_ruby_object?(node) }
+      document.to_ruby
+    end
+
+    def unloaded_ruby_object?(node)
+      return false unless node.is_a?(Psych::Nodes::Mapping) && node.tag&.start_with?('!ruby/object:')
+
+      Object.const_get(node.tag.delete_prefix('!ruby/object:'))
+      false
+    rescue NameError
+      true
     end
 
     def accessories

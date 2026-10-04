@@ -24,6 +24,14 @@ class KamalBridgeTest < Minitest::Test
     KamalBackup::Command.define_singleton_method(:capture) { |*args, **kwargs, &block| original.call(*args, **kwargs, &block) }
   end
 
+  def kamal_bridge_with_config_output(output)
+    bridge = KamalBackup::KamalBridge.new(redactor: KamalBackup::Redactor.new(env: {}))
+    stub_command_capture(KamalBackup::CommandResult.new(stdout: output, stderr: '', status: 0)) do
+      bridge.send(:config)
+    end
+    bridge
+  end
+
   def test_remote_version_uses_the_version_line_from_kamal_output
     output = <<~OUT
       Launching command from new container...
@@ -756,6 +764,35 @@ class KamalBridgeTest < Minitest::Test
 
     assert_includes error.message, 'command failed (1)'
     assert_includes error.message, 'permission denied'
+  end
+
+  def test_ssh_proxy_settings_load_from_kamal_config_output_without_net_ssh
+    jump_output = <<~YAML
+      ---
+      :service: demo
+      :ssh_options:
+        :user: deploy
+        :proxy: !ruby/object:Net::SSH::Proxy::Jump
+          jump_proxies: root@bastion
+    YAML
+    command_output = <<~YAML
+      ---
+      :service: demo
+      :ssh_options:
+        :proxy: !ruby/object:Net::SSH::Proxy::Command
+          command_line_template: ssh -W %h:%p bastion
+          command_line:
+          timeout: 60
+    YAML
+
+    jump = kamal_bridge_with_config_output(jump_output)
+    argv = jump.send(:ssh_argv, 'example.com', 'true', identity_files: [], config_file: nil)
+    assert_equal 'deploy', argv[argv.index('-l') + 1]
+    assert_equal 'root@bastion', argv[argv.index('-J') + 1]
+
+    command = kamal_bridge_with_config_output(command_output)
+    assert_equal 'ssh -W %h:%p bastion', command.send(:ssh_proxy_directive)
+    assert_equal [], command.send(:ssh_proxy_args, command.send(:ssh_options)[:proxy])
   end
 
   def test_ssh_proxy_args_cover_jump_hosts_and_proxy_commands
