@@ -6,6 +6,14 @@ nav_order: 4
 
 Use `restore local` to inspect production data safely on your machine, and `restore production` only for deliberate incident recovery.
 
+When you only need the raw database dump file, use `dump` instead of a full restore. `dump` does not download file or Active Storage backups:
+
+```sh
+bundle exec kamal-backup dump latest -o tmp/app.pgdump
+```
+
+`-o`/`--output` is required, must name a file (not a directory), and the parent directory must already exist. If that file already exists, `dump` stops until you confirm. Pass `--yes` to overwrite without a prompt. `--yes`, or a confirmation given before the download, is also what allows replacing a file that appears at that path while the dump is downloading. See [Commands](/commands/) for details.
+
 `restore production` replaces the target database rather than layering a dump over whatever is already there:
 
 - PostgreSQL removes every non-system schema, recreates `public`, then restores with a client matching server majors 14–18.

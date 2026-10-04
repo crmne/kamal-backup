@@ -275,6 +275,8 @@ restic:
 ```
 {: data-title="config/kamal-backup.yml"}
 
+`dump` uses that path from the accessory's mounted config. It does not read the file on your machine or pass the path on the SSH command line.
+
 ## Validate before boot
 
 Run this before booting or rebooting the accessory:

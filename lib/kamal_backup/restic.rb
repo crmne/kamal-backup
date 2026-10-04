@@ -6,6 +6,7 @@ require 'json'
 require 'open3'
 require 'time'
 require_relative 'command'
+require_relative 'private_tempfile'
 
 module KamalBackup
   class Restic
@@ -13,9 +14,10 @@ module KamalBackup
 
     attr_reader :config, :redactor
 
-    def initialize(config, redactor:)
+    def initialize(config, redactor:, runner: nil)
       @config = config
       @redactor = redactor
+      @runner = runner
     end
 
     def ensure_repository
@@ -173,12 +175,40 @@ module KamalBackup
       pipe_commands(restic_command, command, producer_label: 'restic dump', consumer_label: command.argv.first)
     end
 
-    def write_dump_to_path(snapshot, filename, target_path)
+    def write_dump_to_path(snapshot, filename, target_path, overwrite: false)
       command = CommandSpec.new(argv: ['restic', 'dump', snapshot, filename], env: restic_env)
       target_path = File.expand_path(target_path)
-      FileUtils.mkdir_p(File.dirname(target_path))
-      temp_path = "#{target_path}.kamal-backup-#{$PROCESS_ID}.tmp"
+      raise ConfigurationError, "output path must be a file, not a directory: #{target_path}" if File.directory?(target_path)
 
+      parent = File.dirname(target_path)
+      raise ConfigurationError, "output path directory does not exist: #{parent}" unless File.directory?(parent)
+
+      temp = nil
+      output = Command.output
+      context = output&.command_start(command, redactor: redactor)
+      temp = PrivateTempfile.open(target_path)
+      Open3.popen3(command.env, *command.argv) do |stdin, stdout, stderr, wait_thread|
+        stdin.close
+        stderr_reader = Thread.new do
+          Command.collect_stream(stderr, command_output: output, context: context, stream: :stderr, redactor: redactor)
+        end
+        IO.copy_stream(stdout, temp)
+        err = stderr_reader.value
+        status = wait_thread.value
+        output&.command_exit(context, status.exitstatus)
+        raise_command_error(command, status, '', err) unless status.success?
+      end
+      PrivateTempfile.publish(temp, target_path, overwrite: overwrite)
+      target_path
+    rescue Errno::ENOENT => e
+      raise CommandError.new("command not found: #{command.argv.first}", command: command, status: 127,
+                                                                         stderr: e.message)
+    ensure
+      PrivateTempfile.discard(temp)
+    end
+
+    def pipe_dump_to_io(snapshot, filename, io)
+      command = CommandSpec.new(argv: ['restic', 'dump', snapshot, filename], env: restic_env)
       output = Command.output
       context = output&.command_start(command, redactor: redactor)
       Open3.popen3(command.env, *command.argv) do |stdin, stdout, stderr, wait_thread|
@@ -186,21 +216,16 @@ module KamalBackup
         stderr_reader = Thread.new do
           Command.collect_stream(stderr, command_output: output, context: context, stream: :stderr, redactor: redactor)
         end
-        File.open(temp_path, 'wb') { |file| IO.copy_stream(stdout, file) }
+        IO.copy_stream(stdout, io)
         err = stderr_reader.value
         status = wait_thread.value
         output&.command_exit(context, status.exitstatus)
         raise_command_error(command, status, '', err) unless status.success?
       end
-      File.rename(temp_path, target_path)
-      target_path
+      true
     rescue Errno::ENOENT => e
-      FileUtils.rm_f(temp_path) if temp_path
       raise CommandError.new("command not found: #{command.argv.first}", command: command, status: 127,
                                                                          stderr: e.message)
-    rescue StandardError
-      FileUtils.rm_f(temp_path) if temp_path
-      raise
     end
 
     def restore_snapshot(snapshot, target)
@@ -208,9 +233,17 @@ module KamalBackup
       run(['restore', snapshot, '--target', target])
     end
 
+    def self.environment_for(config)
+      config.env.each_with_object({}) do |(key, value), env|
+        env[key] = value if key.to_s.match?(RESTIC_ENV_PATTERN)
+      end
+    end
+
     private
 
     def run(args, log_output: true, env: restic_env)
+      return @runner.call(args, log_output: log_output, env: env) if @runner
+
       Command.capture(
         CommandSpec.new(argv: ['restic'] + args, env: env),
         redactor: redactor,
@@ -284,9 +317,7 @@ module KamalBackup
     end
 
     def restic_env
-      config.env.each_with_object({}) do |(key, value), env|
-        env[key] = value if key.to_s.match?(RESTIC_ENV_PATTERN)
-      end
+      self.class.environment_for(config)
     end
 
     def pipe_commands(producer, consumer, producer_label:, consumer_label:)

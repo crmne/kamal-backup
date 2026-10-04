@@ -71,7 +71,7 @@ module KamalBackup
       def restore_database(restic, snapshot, filename, target:)
         Tempfile.create(['kamal-backup-restore-', '.sqlite3']) do |tempfile|
           tempfile.close
-          restic.write_dump_to_path(snapshot, filename, tempfile.path)
+          restic.write_dump_to_path(snapshot, filename, tempfile.path, overwrite: true)
           validate_database_file(tempfile.path)
           FileUtils.mkdir_p(File.dirname(File.expand_path(target)))
           Command.capture(

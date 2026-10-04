@@ -114,6 +114,7 @@ Run the first backup, check the repository, and print evidence. From an app chec
 ```sh
 bundle exec kamal-backup backup
 bundle exec kamal-backup list
+bundle exec kamal-backup dump latest -o tmp/app.pgdump
 bundle exec kamal-backup check
 bundle exec kamal-backup unlock
 bundle exec kamal-backup evidence

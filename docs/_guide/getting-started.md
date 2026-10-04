@@ -125,12 +125,15 @@ From your app checkout, use the gem and let it shell out through Kamal:
 ```sh
 bundle exec kamal-backup backup
 bundle exec kamal-backup list
+bundle exec kamal-backup dump latest -o tmp/app.pgdump
 bundle exec kamal-backup evidence
 ```
 
 `backup` respects the configured schedule and tells you when no backup is due. Use `bundle exec kamal-backup backup --force` to create an immediate snapshot.
 
-With the default `config/deploy.yml`, `backup`, `list`, `check`, `unlock`, `evidence`, `validate`, and `version` infer the backup accessory. If you keep multiple deploy configs or destinations, pass `-c` or `-d` the same way Kamal does:
+`dump` downloads one database dump file from a restic snapshot. It does not download file or Active Storage backups; use `restore` for those. `-o`/`--output` is required, must name a file (not a directory), and the parent directory must already exist. If that file already exists, `dump` stops until you confirm (`--yes` overwrites without a prompt, including a file created while the download is in progress). Use a snapshot id from `list` when you do not want `latest`. When more than one database is configured, pass `--database NAME`, where `NAME` is the `name` in `config/kamal-backup.yml`. A name that does not match lists the configured names. A mismatched extension (for example `.sql` for a Postgres `.pgdump`) warns but still writes the file. A missing live database file does not block the download.
+
+With the default `config/deploy.yml`, `backup`, `list`, `dump`, `check`, `unlock`, `evidence`, `validate`, and `version` infer the backup accessory. If you keep multiple deploy configs or destinations, pass `-c` or `-d` the same way Kamal does:
 
 ```sh
 bundle exec kamal-backup -c config/deploy.staging.yml -d staging backup
