@@ -33,8 +33,16 @@ jobs:
         with:
           ruby-version: "3.4"
           bundler-cache: true
-      - name: Install restic and sqlite3 for integration tests
-        run: sudo apt-get update && sudo apt-get install -y restic sqlite3
+      - name: Install sqlite3 for integration tests
+        run: sudo apt-get update && sudo apt-get install -y sqlite3
+      - name: Install the restic version the image ships
+        run: |
+          version="$(sed -n 's/^ARG RESTIC_VERSION=//p' Dockerfile)"
+          sha="$(sed -n 's/^ARG RESTIC_SHA256_AMD64=//p' Dockerfile)"
+          curl -fsSL -o /tmp/restic.bz2 "https://github.com/restic/restic/releases/download/v${version}/restic_${version}_linux_amd64.bz2"
+          echo "${sha}  /tmp/restic.bz2" | sha256sum -c -
+          bunzip2 /tmp/restic.bz2
+          sudo install -m 0755 /tmp/restic /usr/local/bin/restic
       - run: bin/test
         env:
           KAMAL_BACKUP_RUN_INTEGRATION: "1"
