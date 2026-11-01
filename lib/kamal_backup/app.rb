@@ -36,7 +36,7 @@ module KamalBackup
       return skipped_backup_result(started_at) unless force || backup_due?(started_at)
 
       restic.ensure_repository
-      databases.each { |database| database.backup(restic) }
+      databases.each { |database| backup_database(database) }
       restic.backup_paths(config.backup_paths, tags: ['type:files'])
 
       restic.prune if config.forget_after_backup?
@@ -209,6 +209,18 @@ module KamalBackup
     end
 
     private
+
+    def backup_database(database)
+      database.backup(restic)
+    rescue CommandError => e
+      raise CommandError.new(
+        "database backup failed for #{database_config_name(database)}: #{e.message}",
+        command: e.command,
+        status: e.status,
+        stdout: e.stdout,
+        stderr: e.stderr
+      )
+    end
 
     def backup_due?(now)
       due_at = next_backup_at

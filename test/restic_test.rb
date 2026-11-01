@@ -119,6 +119,84 @@ class ResticTest < Minitest::Test
     ], exclude_pairs
   end
 
+  def incomplete_backup_error(stdout: "snapshot abc12345 saved\n")
+    KamalBackup::CommandError.new(
+      'command failed (3): restic backup',
+      command: KamalBackup::CommandSpec.new(argv: %w[restic backup]),
+      status: 3,
+      stdout: stdout,
+      stderr: 'read mysql.sql: no data read'
+    )
+  end
+
+  def restic_with_runner(&runner)
+    config = KamalBackup::Config.new(env: base_env('APP_NAME' => 'demo'))
+    restic = KamalBackup::Restic.new(config, redactor: KamalBackup::Redactor.new(env: {}), runner: runner)
+    restic.define_singleton_method(:log) { |_message| nil }
+    restic
+  end
+
+  def back_up_stream(restic)
+    restic.backup_stream(
+      KamalBackup::CommandSpec.new(argv: %w[mariadb-dump app]),
+      filename: 'databases/demo/app/mysql.sql',
+      tags: ['type:database']
+    )
+  end
+
+  def test_backup_stream_forgets_the_incomplete_snapshot_restic_saved
+    calls = []
+    restic = restic_with_runner do |args, **|
+      calls << args
+      raise incomplete_backup_error if args.first == 'backup'
+
+      KamalBackup::CommandResult.new(stdout: '', stderr: '', status: 0)
+    end
+
+    error = assert_raises(KamalBackup::CommandError) { back_up_stream(restic) }
+
+    assert_equal %w[forget abc12345], calls.last
+    assert_equal 3, error.status
+    assert_equal 'read mysql.sql: no data read', error.stderr
+    assert_includes error.message, 'Removed incomplete snapshot abc12345.'
+  end
+
+  def test_backup_stream_names_the_incomplete_snapshot_when_forget_fails
+    restic = restic_with_runner do |args, **|
+      raise incomplete_backup_error if args.first == 'backup'
+
+      raise KamalBackup::CommandError.new('repository is append-only', command: nil, status: 1)
+    end
+
+    error = assert_raises(KamalBackup::CommandError) { back_up_stream(restic) }
+
+    assert_equal 3, error.status
+    assert_includes error.message, 'run `restic forget abc12345`'
+    assert_includes error.message, 'repository is append-only'
+  end
+
+  def test_backup_stream_reports_exit_3_without_a_snapshot_id
+    restic = restic_with_runner { |*, **| raise incomplete_backup_error(stdout: '') }
+
+    error = assert_raises(KamalBackup::CommandError) { back_up_stream(restic) }
+
+    assert_includes error.message, 'restic may have saved an incomplete snapshot'
+  end
+
+  def test_backup_stream_forgets_nothing_when_restic_fails_outright
+    calls = []
+    restic = restic_with_runner do |args, **|
+      calls << args
+      raise KamalBackup::CommandError.new('command failed (1): restic backup', command: nil, status: 1,
+                                                                               stdout: 'snapshot abc12345 saved')
+    end
+
+    error = assert_raises(KamalBackup::CommandError) { back_up_stream(restic) }
+
+    assert_equal ['backup'], calls.map(&:first)
+    assert_equal 'command failed (1): restic backup', error.message
+  end
+
   def test_backup_stream_does_not_apply_file_backup_excludes
     config = KamalBackup::Config.new(env: base_env(
       'APP_NAME' => 'demo',

@@ -143,6 +143,18 @@ class CommandTest < Minitest::Test
     refute_includes io.string, 'supersecret123'
   end
 
+  def test_command_output_reports_a_signal_killed_command_as_failed
+    io = StringIO.new
+    output = KamalBackup::CommandOutput.new(io: io, env: {})
+    spec = KamalBackup::CommandSpec.new(argv: ['restic'])
+    context = output.command_start(spec, redactor: KamalBackup::Redactor.new(env: {}))
+
+    output.command_exit(context, nil)
+
+    assert_includes io.string, '(failed)'
+    refute_includes io.string, 'successful'
+  end
+
   def test_command_output_can_log_remote_host_target
     io = StringIO.new
     redactor = KamalBackup::Redactor.new(env: {})

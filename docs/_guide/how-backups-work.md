@@ -43,11 +43,19 @@ When a backup run starts, `kamal-backup` does five things:
 2. It creates database backups using the database-native export tool:
    PostgreSQL uses `pg_dump`, MySQL/MariaDB use `mariadb-dump` or `mysqldump`, and SQLite uses `sqlite3 .backup`.
 3. It has restic run and capture each database export, then tags the snapshot with `type:database`,
-   `database:<name>`, and `adapter:<adapter>`. If the export command fails, restic does not create a snapshot.
+   `database:<name>`, and `adapter:<adapter>`. If the export command fails, even after writing part of a dump, restic does not create a snapshot. If it exits successfully but writes nothing, restic saves a snapshot with no dump in it, so `kamal-backup` removes that snapshot and fails the run.
 4. When `paths` is explicitly configured, it runs one `restic backup` for those paths and tags that snapshot with `type:files`. Path-level excludes and automatic SQLite database/WAL/SHM excludes apply only to this file snapshot.
 5. It optionally prunes old snapshots and runs the same repository verification as `kamal-backup check`, depending on configuration.
 
 The result is one database snapshot per database and, when paths are configured, one file snapshot per run. No file path is inferred from Rails.
+
+## When a backup fails
+
+A failed database export stops the run: later databases and file paths are not backed up, retention does not run, and the last successful backup record is left as it was. The snapshots of databases that finished earlier in the run stay in the repository.
+
+`kamal-backup backup` prints an `ERROR` line and exits non-zero. The scheduler has to keep running, so it logs `ERROR [kamal-backup] backup failed at ...` to stderr and tries again at the next `backup.schedule`. Alert on that line in your log monitoring.
+
+Versions before 0.4.1 piped the export into restic, so a failed export could still leave a snapshot holding a truncated dump. Those snapshots look normal in `kamal-backup list`, and `restic check` passes. If a run from one of those versions logged a failed backup, do not rely on the snapshot taken at that time.
 
 ## What gets backed up
 

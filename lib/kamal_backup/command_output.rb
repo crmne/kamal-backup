@@ -82,8 +82,10 @@ module KamalBackup
 
     def command_exit(context, status)
       runtime = Process.clock_gettime(Process::CLOCK_MONOTONIC) - context.fetch(:started_at)
-      result = status.to_i.zero? ? 'successful' : 'failed'
-      result_color = status.to_i.zero? ? :green : :red
+      # A command killed by a signal has no exit status, so nil is a failure.
+      successful = status&.zero?
+      result = successful ? 'successful' : 'failed'
+      result_color = successful ? :green : :red
 
       synchronize do
         flush_output_buffers(context)

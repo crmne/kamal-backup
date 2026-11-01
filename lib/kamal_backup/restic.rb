@@ -11,6 +11,7 @@ require_relative 'private_tempfile'
 module KamalBackup
   class Restic
     RESTIC_ENV_PATTERN = /\A(?:RESTIC_|AWS_|B2_|AZURE_|GOOGLE_|RCLONE_|OS_|ST_|HP_|HTTP_|HTTPS_|NO_PROXY)/i
+    INCOMPLETE_SNAPSHOT_STATUS = 3
 
     attr_reader :config, :redactor
 
@@ -31,11 +32,13 @@ module KamalBackup
 
     def backup_stream(command, filename:, tags:)
       log("backing up stream as #{filename}")
-      run(
-        ['backup'] + host_args + ['--stdin-filename', filename] + tag_args(common_tags + tags) +
-          ['--stdin-from-command', '--'] + command.argv,
-        env: restic_env.merge(command.env)
-      )
+      without_incomplete_snapshot do
+        run(
+          ['backup'] + host_args + ['--stdin-filename', filename] + tag_args(common_tags + tags) +
+            ['--stdin-from-command', '--'] + command.argv,
+          env: restic_env.merge(command.env)
+        )
+      end
     end
 
     def backup_file(path, filename:, tags:)
@@ -46,34 +49,36 @@ module KamalBackup
       )
       log("backing up file content as #{filename}")
 
-      File.open(path, 'rb') do |file|
-        output = Command.output
-        context = output&.command_start(command, redactor: redactor)
-        Open3.popen3(command.env, *command.argv) do |stdin, stdout, stderr, wait_thread|
-          stdout_reader = Thread.new do
-            Command.collect_stream(stdout, command_output: output, context: context, stream: :stdout,
-                                           redactor: redactor)
-          end
-          stderr_reader = Thread.new do
-            Command.collect_stream(stderr, command_output: output, context: context, stream: :stderr,
-                                           redactor: redactor)
-          end
-          copy_error = nil
-          begin
-            IO.copy_stream(file, stdin)
-          rescue Errno::EPIPE => e
-            copy_error = e
-          ensure
-            stdin.close unless stdin.closed?
-          end
-          out = stdout_reader.value
-          err = stderr_reader.value
-          status = wait_thread.value
-          output&.command_exit(context, status.exitstatus)
-          raise_command_error(command, status, out, err) unless status.success?
-          raise_stream_error(command, copy_error, out, err) if copy_error
+      without_incomplete_snapshot do
+        File.open(path, 'rb') do |file|
+          output = Command.output
+          context = output&.command_start(command, redactor: redactor)
+          Open3.popen3(command.env, *command.argv) do |stdin, stdout, stderr, wait_thread|
+            stdout_reader = Thread.new do
+              Command.collect_stream(stdout, command_output: output, context: context, stream: :stdout,
+                                             redactor: redactor)
+            end
+            stderr_reader = Thread.new do
+              Command.collect_stream(stderr, command_output: output, context: context, stream: :stderr,
+                                             redactor: redactor)
+            end
+            copy_error = nil
+            begin
+              IO.copy_stream(file, stdin)
+            rescue Errno::EPIPE => e
+              copy_error = e
+            ensure
+              stdin.close unless stdin.closed?
+            end
+            out = stdout_reader.value
+            err = stderr_reader.value
+            status = wait_thread.value
+            output&.command_exit(context, status.exitstatus)
+            raise_command_error(command, status, out, err) unless status.success?
+            raise_stream_error(command, copy_error, out, err) if copy_error
 
-          CommandResult.new(stdout: out, stderr: err, status: status.exitstatus)
+            CommandResult.new(stdout: out, stderr: err, status: status.exitstatus)
+          end
         end
       end
     rescue Errno::ENOENT => e
@@ -379,6 +384,33 @@ module KamalBackup
       command = e.message.include?(producer.argv.first) ? producer : consumer
       raise CommandError.new("command not found: #{command.argv.first}", command: command, status: 127,
                                                                          stderr: e.message)
+    end
+
+    # restic exits 3 when it could not read a source but saved a snapshot anyway.
+    # A dump that exits 0 without writing anything ends up here: the snapshot has
+    # no dump in it, yet it would become the latest one and use a retention slot.
+    def without_incomplete_snapshot
+      yield
+    rescue CommandError => e
+      raise unless e.status == INCOMPLETE_SNAPSHOT_STATUS
+
+      raise CommandError.new(
+        "#{e.message}\n#{discard_incomplete_snapshot(e.stdout)}",
+        command: e.command,
+        status: e.status,
+        stdout: e.stdout,
+        stderr: e.stderr
+      )
+    end
+
+    def discard_incomplete_snapshot(stdout)
+      snapshot = stdout[/snapshot (\h+) saved/, 1]
+      return 'restic may have saved an incomplete snapshot; check `kamal-backup list`.' unless snapshot
+
+      run(['forget', snapshot])
+      "Removed incomplete snapshot #{snapshot}."
+    rescue CommandError => e
+      "Could not remove incomplete snapshot #{snapshot}; run `restic forget #{snapshot}`: #{e.message}"
     end
 
     def raise_command_error(command, status, stdout, stderr)

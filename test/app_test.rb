@@ -372,6 +372,41 @@ class AppTest < Minitest::Test
     end
   end
 
+  def test_failed_database_dump_stops_the_run_before_files_and_retention
+    Dir.mktmpdir do |dir|
+      db = File.join(dir, 'app.sqlite3')
+      files = File.join(dir, 'storage')
+      File.write(db, '')
+      FileUtils.mkdir_p(files)
+      restic = FakeRestic.new
+      database = FakeDatabase.new
+      dump_error = KamalBackup::CommandError.new(
+        'command failed (1): restic backup', command: nil, status: 1, stderr: 'Error 2013: Lost connection'
+      )
+      database.define_singleton_method(:backup) { |_restic| raise dump_error }
+
+      app = KamalBackup::App.new(
+        env: base_env(
+          'DATABASE_ADAPTER' => 'sqlite',
+          'SQLITE_DATABASE_PATH' => db,
+          'BACKUP_PATHS' => files,
+          'KAMAL_BACKUP_STATE_DIR' => File.join(dir, 'state')
+        ),
+        restic: restic,
+        database: database
+      )
+
+      error = assert_raises(KamalBackup::CommandError) { app.backup(force: true) }
+
+      assert_equal 'database backup failed for app: command failed (1): restic backup', error.message
+      assert_equal 1, error.status
+      assert_equal 'Error 2013: Lost connection', error.stderr
+      assert_empty restic.backup_path_calls
+      assert_equal 0, restic.prune_calls
+      refute_path_exists app.config.last_backup_path
+    end
+  end
+
   def test_backup_can_skip_forget_for_append_only_repositories
     Dir.mktmpdir do |dir|
       db = File.join(dir, 'app.sqlite3')

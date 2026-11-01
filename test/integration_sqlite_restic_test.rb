@@ -214,6 +214,53 @@ class IntegrationSqliteResticTest < Minitest::Test
     end
   end
 
+  def test_failed_dump_fails_the_run_and_keeps_only_the_last_good_snapshot
+    skip 'set KAMAL_BACKUP_RUN_INTEGRATION=1 to run restic integration tests' unless ENV['KAMAL_BACKUP_RUN_INTEGRATION'] == '1'
+    skip 'restic is required' unless system('which', 'restic', out: File::NULL)
+
+    failing_dumps = {
+      'partial output' => ['printf partial-data', 'echo dump-failed >&2', 'exit 3'],
+      'no output' => ['echo dump-failed >&2', 'exit 2'],
+      'killed' => ['printf partial-data', 'echo dump-failed >&2', 'kill -9 $$'],
+      'success without output' => ['exit 0']
+    }
+
+    Dir.mktmpdir do |dir|
+      dump = File.join(dir, 'dump')
+      files = File.join(dir, 'files')
+      FileUtils.mkdir_p(files)
+      File.write(File.join(files, 'hello.txt'), 'hello')
+      write_fake_dump(dump, ['echo complete-dump'])
+      app = KamalBackup::App.new(
+        env: base_env(
+          'APP_NAME' => 'integration',
+          'DATABASE_ADAPTER' => 'mysql',
+          'MYSQL_DATABASE' => 'app',
+          'MYSQL_DUMP_BIN' => dump,
+          'BACKUP_PATHS' => files,
+          'RESTIC_REPOSITORY' => File.join(dir, 'repo'),
+          'RESTIC_PASSWORD' => 'integration-secret',
+          'RESTIC_INIT_IF_MISSING' => 'true',
+          'RESTIC_FORGET_AFTER_BACKUP' => 'false',
+          'KAMAL_BACKUP_STATE_DIR' => File.join(dir, 'state')
+        )
+      )
+      app.backup(force: true)
+      last_backup = File.read(app.config.last_backup_path)
+      snapshots = app.send(:restic).snapshots_json.map { |snapshot| snapshot.fetch('id') }
+
+      failing_dumps.each do |name, script|
+        write_fake_dump(dump, script)
+
+        error = assert_raises(KamalBackup::CommandError, name) { app.backup(force: true) }
+
+        assert_includes error.message, 'database backup failed for app', name
+        assert_equal snapshots, app.send(:restic).snapshots_json.map { |snapshot| snapshot.fetch('id') }, name
+        assert_equal last_backup, File.read(app.config.last_backup_path), name
+      end
+    end
+  end
+
   def test_dump_downloads_sqlite_bytes_from_latest_and_an_older_files_snapshot
     skip 'set KAMAL_BACKUP_RUN_INTEGRATION=1 to run restic integration tests' unless ENV['KAMAL_BACKUP_RUN_INTEGRATION'] == '1'
     skip 'sqlite3 is required' unless system('which', 'sqlite3', out: File::NULL)
@@ -357,5 +404,10 @@ class IntegrationSqliteResticTest < Minitest::Test
       'RESTIC_PASSWORD_FILE' => nil,
       'RESTIC_PASSWORD_COMMAND' => nil
     )
+  end
+
+  def write_fake_dump(path, lines)
+    File.write(path, "#!/bin/sh\n#{lines.join("\n")}\n")
+    File.chmod(0o755, path)
   end
 end
