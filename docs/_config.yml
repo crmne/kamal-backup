@@ -127,6 +127,10 @@ jekyll_vitepress:
     switch_to_light: Switch to light theme
   behavior:
     scroll_offset: 134
+  # `bundle exec jekyll-vitepress build` publishes the latest release at /
+  # and master at /next/.
+  versions:
+    next: true
 
 plugins:
   - jekyll-vitepress-theme

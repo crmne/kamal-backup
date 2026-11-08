@@ -1,0 +1,26 @@
+name: Docs
+
+on:
+  push:
+    branches: [master]
+    tags: ['v*']
+    paths:
+      - docs/**
+      - .github/workflows/docs.yml
+  release:
+    types: [published]
+  workflow_call:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  docs:
+    uses: crmne/jekyll-vitepress-theme/.github/workflows/publish-docs.yml@v1
