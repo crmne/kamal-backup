@@ -1,7 +1,9 @@
 ---
 layout: home
 title: kamal-backup Documentation
-description: "Add scheduled, encrypted backups to Rails apps deployed with Kamal: database dumps, Active Storage files, restore drills, and review evidence."
+seo:
+  title: Add scheduled Rails backups to Kamal
+description: "Scheduled, encrypted backups for Rails apps deployed with Kamal: PostgreSQL, MySQL, or SQLite dumps, Active Storage files, restore drills, and review evidence."
 permalink: /
 hero:
   name: kamal-backup

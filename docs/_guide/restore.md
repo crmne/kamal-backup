@@ -1,5 +1,7 @@
 ---
 title: Restore
+seo:
+  title: Restore Rails database and Active Storage backups
 description: Restore database and Active Storage backups onto your local machine or back into production.
 nav_order: 4
 ---

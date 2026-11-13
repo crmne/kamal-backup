@@ -1,5 +1,7 @@
 ---
 title: Getting Started
+seo:
+  title: Back up a Rails app deployed with Kamal
 description: Add one Kamal accessory that runs scheduled backups for your database and file-backed Active Storage files.
 nav_order: 1
 ---

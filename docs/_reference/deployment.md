@@ -1,5 +1,6 @@
 ---
 title: Docs Deployment
+noindex: true
 description: How the documentation site is built and deployed.
 nav_order: 3
 ---
