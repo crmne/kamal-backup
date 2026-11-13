@@ -138,6 +138,7 @@ plugins:
 
 exclude:
   - _site
+  - 2026-11-13-seo.md
   - .jekyll-cache
   - .sass-cache
   - .bundle
