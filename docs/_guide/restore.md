@@ -18,7 +18,7 @@ bundle exec kamal-backup dump latest -o tmp/app.pgdump
 
 `restore production` replaces the target database rather than layering a dump over whatever is already there:
 
-- PostgreSQL removes every non-system schema, recreates `public`, then restores with a client matching server majors 14–18.
+- PostgreSQL removes every non-system schema, recreates `public`, then restores with a client matching server majors 14–19.
 - MySQL/MariaDB removes existing views, tables, MariaDB sequences, routines, and events before importing the dump.
 - SQLite validates the downloaded backup, replaces the live database through SQLite's backup API, then checks the restored database again.
 

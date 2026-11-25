@@ -46,7 +46,7 @@ RUN apt-get update \
   && restic version \
   && rclone version \
   && ssh -V \
-  && for version in 14 15 16 17 18 19; do test -x "/usr/lib/postgresql/${version}/bin/pg_dump"; done \
+  && for version in 14 15 16 17 18 19; do test -x "/usr/lib/postgresql/${version}/bin/pg_dump" || exit 1; done \
   && rm -rf /var/lib/apt/lists/* /tmp/restic /tmp/rclone /tmp/rclone.zip
 
 WORKDIR /app
