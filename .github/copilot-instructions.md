@@ -52,7 +52,7 @@ bundle exec rubocop
 bin/test
 ```
 
-CI additionally builds the accessory and exercises PostgreSQL 14 through 18,
+CI additionally builds the accessory and exercises PostgreSQL 14 through 19,
 MySQL 8.0 and 8.4, MariaDB 10.11, 11.4, and 11.8, plus SQLite through rclone.
 Do not claim those database versions or container paths were tested locally
 when they were only covered by CI.

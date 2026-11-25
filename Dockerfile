@@ -29,6 +29,7 @@ RUN apt-get update \
     postgresql-client-16 \
     postgresql-client-17 \
     postgresql-client-18 \
+    postgresql-client-19 \
   && case "${TARGETARCH}" in \
     amd64) restic_arch=amd64; restic_sha="${RESTIC_SHA256_AMD64}"; rclone_sha="${RCLONE_SHA256_AMD64}" ;; \
     arm64) restic_arch=arm64; restic_sha="${RESTIC_SHA256_ARM64}"; rclone_sha="${RCLONE_SHA256_ARM64}" ;; \
@@ -45,7 +46,7 @@ RUN apt-get update \
   && restic version \
   && rclone version \
   && ssh -V \
-  && for version in 14 15 16 17 18; do test -x "/usr/lib/postgresql/${version}/bin/pg_dump"; done \
+  && for version in 14 15 16 17 18 19; do test -x "/usr/lib/postgresql/${version}/bin/pg_dump"; done \
   && rm -rf /var/lib/apt/lists/* /tmp/restic /tmp/rclone /tmp/rclone.zip
 
 WORKDIR /app

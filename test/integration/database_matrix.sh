@@ -386,7 +386,7 @@ run_rclone_sqlite() {
 docker image inspect "$IMAGE" >/dev/null 2>&1 || fail "build $IMAGE before running the database matrix"
 docker network create "$NETWORK" >/dev/null
 
-for postgres_major in 14 15 16 17 18; do
+for postgres_major in 14 15 16 17 18 19; do
   run_postgres "$postgres_major"
 done
 
