@@ -18,7 +18,7 @@ bundle exec kamal-backup dump latest -o tmp/app.pgdump
 
 `restore production` replaces the target database rather than layering a dump over whatever is already there:
 
-- PostgreSQL removes every non-system schema, recreates `public`, then restores with a client matching server majors 14–18.
+- PostgreSQL removes every non-system schema, recreates `public`, then restores with a client matching server majors 14–19.
 - MySQL/MariaDB removes existing views, tables, MariaDB sequences, routines, and events before importing the dump.
 - SQLite validates the downloaded backup, replaces the live database through SQLite's backup API, then checks the restored database again.
 
@@ -157,7 +157,7 @@ This is intentionally not a quiet operation. `restore production` is for real in
 
 `restore production` does not accept `--yes` as a confirmation shortcut. Interactive use asks you to type the app name and `RESTORE PRODUCTION`. Automation must pass the explicit `--confirm-production-restore` flag.
 
-The accessory image selects PostgreSQL 14, 15, 16, 17, or 18 client tools to match the target server. A local
+The accessory image selects PostgreSQL 14, 15, 16, 17, 18, or 19 client tools to match the target server. A local
 PostgreSQL restore uses the tools installed on your machine; install a client matching the local target's major
 version. Restores require privileges to replace the target schema or database objects.
 MySQL/MariaDB restores that contain routines, triggers, or events also require the corresponding database privileges;
@@ -169,7 +169,7 @@ The automated restore matrix exercises exact backup and restore behavior against
 
 | Database | Versions |
 | --- | --- |
-| PostgreSQL | 14, 15, 16, 17, and 18 |
+| PostgreSQL | 14, 15, 16, 17, 18, and 19 |
 | MySQL | 8.0 and 8.4 (LTS) |
 | MariaDB | 10.11, 11.4, and 11.8 LTS |
 | SQLite | The SQLite client shipped in the accessory image, including WAL-mode databases |
