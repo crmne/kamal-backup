@@ -109,6 +109,8 @@ module KamalBackup
       @database_definitions = config_data.database_definitions
       @path_definitions = config_data.path_definitions
       @restore_from_definitions = config_data.restore_from_definitions
+      @copy_definitions = config_data.copy_definitions || []
+      @config_missing_secrets = config_data.missing_secrets
       @env = base.merge(defaults.to_h).merge(config_data.env).merge(raw_env)
     end
 
@@ -204,6 +206,12 @@ module KamalBackup
       end
     end
 
+    # Remote-to-remote rclone copies, such as Cloudflare R2 to AWS S3. They
+    # run after the restic snapshots and are not stored in the restic repository.
+    def copies
+      @copy_definitions
+    end
+
     def backup_path_excludes(paths = backup_paths)
       paths = Array(paths).compact.map(&:to_s).reject(&:empty?)
 
@@ -287,6 +295,7 @@ module KamalBackup
     end
 
     def validate_restic(check_files: true)
+      validate_config_secrets('restic')
       required_app_name
       validate_restic_repository(check_files: check_files)
       validate_restic_password(check_files: check_files)
@@ -296,6 +305,26 @@ module KamalBackup
       validate_restic(check_files: check_files)
       validate_database_backup(check_files: check_files)
       validate_backup_paths(check_files: check_files)
+      validate_copies
+    end
+
+    def validate_config_secrets(group)
+      names = @config_missing_secrets.fetch(group)
+      raise ConfigurationError, "missing secret or variable #{names.join(', ')}" unless names.empty?
+    end
+
+    def validate_copies
+      validate_config_secrets('rclone')
+      copies.each_with_index do |copy, index|
+        label = "copies[#{index + 1}]"
+        raise ConfigurationError, "#{label} requires missing secret #{copy.missing_secrets.join(', ')}" unless copy.missing_secrets.empty?
+
+        %i[source destination].each do |key|
+          raise ConfigurationError, "#{label} #{key} is required" if copy[key].to_s.strip.empty?
+        end
+
+        raise ConfigurationError, "#{label} source and destination must differ" if copy.source.strip == copy.destination.strip
+      end
     end
 
     def validate_local_machine_restore
@@ -420,6 +449,8 @@ module KamalBackup
         merged.database_definitions = data.database_definitions if data.database_definitions
         merged.path_definitions = data.path_definitions if data.path_definitions
         merged.restore_from_definitions = data.restore_from_definitions if data.restore_from_definitions
+        merged.copy_definitions = data.copy_definitions if data.copy_definitions
+        data.missing_secrets.each { |group, names| merged.missing_secrets.fetch(group).concat(names) }
       end
     end
 

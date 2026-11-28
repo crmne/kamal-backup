@@ -126,6 +126,7 @@ bundle exec kamal-backup evidence
 
 - **Scheduled backups:** the accessory runs continuously and backs up on `backup.schedule`.
 - **Database and Active Storage coverage:** database dumps plus file-backed Active Storage files from mounted volumes.
+- **Object storage copies:** copy an S3-compatible bucket, such as Cloudflare R2, to another bucket with rclone on the same schedule.
 - **Restic underneath:** encrypted, deduplicated snapshots in native restic backends or any rclone remote; the accessory includes both rclone and an SSH client.
 - **Local restores:** inspect production data safely in your local Rails app.
 - **Restore drills:** restore into scratch production-side targets, run verification commands, and record the result.

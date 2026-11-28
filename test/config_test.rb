@@ -682,4 +682,294 @@ class ConfigTest < Minitest::Test
 
     refute config.forget_after_backup?
   end
+
+  def write_copies_config(dir, copies_yaml)
+    config_dir = File.join(dir, 'config')
+    FileUtils.mkdir_p(config_dir)
+    File.write(
+      File.join(config_dir, 'kamal-backup.yml'),
+      <<~YAML
+        app: copies-app
+        databases:
+          - name: app
+            adapter: postgres
+            url: postgres://app@postgres:5432/app_production
+        restic:
+          repository: /tmp/restic-repo
+          password: restic-secret
+        #{copies_yaml}
+      YAML
+    )
+  end
+
+  def test_loads_copies_with_literal_and_secret_values
+    Dir.mktmpdir do |dir|
+      write_copies_config(dir, <<~YAML.gsub(/^/, '        ').strip)
+        copies:
+          - source: r2:production
+            destination:
+              secret: FILES_BACKUP_DESTINATION
+      YAML
+
+      config = KamalBackup::Config.new(
+        env: { 'FILES_BACKUP_DESTINATION' => 's3:app-files-backups/production' },
+        cwd: dir,
+        load_project_defaults: false
+      )
+
+      assert_equal 1, config.copies.size
+      assert_equal 'r2:production', config.copies.first.source
+      assert_equal 's3:app-files-backups/production', config.copies.first.destination
+      config.validate_backup
+    end
+  end
+
+  def test_copies_default_to_empty
+    config = KamalBackup::Config.new(env: base_env, load_project_defaults: false)
+
+    assert_empty config.copies
+  end
+
+  def test_validate_backup_rejects_copy_with_missing_secret
+    Dir.mktmpdir do |dir|
+      write_copies_config(dir, <<~YAML.gsub(/^/, '        ').strip)
+        copies:
+          - source:
+              secret: FILES_BACKUP_SOURCE
+            destination: s3:app-files-backups/production
+      YAML
+
+      config = KamalBackup::Config.new(env: {}, cwd: dir, load_project_defaults: false)
+      error = assert_raises(KamalBackup::ConfigurationError) { config.validate_backup }
+
+      assert_equal 'copies[1] requires missing secret FILES_BACKUP_SOURCE', error.message
+    end
+  end
+
+  def test_validate_backup_rejects_copy_to_itself
+    Dir.mktmpdir do |dir|
+      write_copies_config(dir, <<~YAML.gsub(/^/, '        ').strip)
+        copies:
+          - source: r2:production
+            destination: r2:production
+      YAML
+
+      config = KamalBackup::Config.new(env: {}, cwd: dir, load_project_defaults: false)
+      error = assert_raises(KamalBackup::ConfigurationError) { config.validate_backup }
+
+      assert_equal 'copies[1] source and destination must differ', error.message
+    end
+  end
+
+  def test_copies_reject_missing_destination_and_unknown_keys
+    Dir.mktmpdir do |dir|
+      write_copies_config(dir, <<~YAML.gsub(/^/, '        ').strip)
+        copies:
+          - source: r2:production
+      YAML
+
+      error = assert_raises(KamalBackup::ConfigurationError) do
+        KamalBackup::Config.new(env: {}, cwd: dir, load_project_defaults: false)
+      end
+      assert_includes error.message, 'copies[1] destination is required'
+
+      write_copies_config(dir, <<~YAML.gsub(/^/, '        ').strip)
+        copies:
+          - source: r2:production
+            destination: s3:backups
+            flags: --dry-run
+      YAML
+
+      error = assert_raises(KamalBackup::ConfigurationError) do
+        KamalBackup::Config.new(env: {}, cwd: dir, load_project_defaults: false)
+      end
+      assert_includes error.message, 'contains unknown key "flags"'
+    end
+  end
+
+  def write_backup_config(dir, yaml)
+    config_dir = File.join(dir, 'config')
+    FileUtils.mkdir_p(config_dir)
+    File.write(File.join(config_dir, 'kamal-backup.yml'), yaml)
+  end
+
+  def secret_named_config_yaml
+    <<~YAML
+      app:
+        secret: BACKUP_APP_NAME
+      databases:
+        - name: app
+          adapter: postgres
+          url: postgres://app@postgres:5432/app_production
+      restic:
+        repository: s3:https://s3.example.com/app-db-backups/production
+        password: restic-secret
+        s3:
+          access_key_id:
+            secret: BACKUP_S3_ACCESS_KEY_ID
+          secret_access_key:
+            secret: BACKUP_S3_SECRET_ACCESS_KEY
+          region: eu-central-1
+      rclone:
+        r2:
+          type: s3
+          provider: Cloudflare
+          endpoint:
+            secret: BACKUP_R2_ENDPOINT
+        s3:
+          type: s3
+          access_key_id:
+            secret: BACKUP_S3_ACCESS_KEY_ID
+    YAML
+  end
+
+  def test_loads_app_restic_s3_credentials_and_rclone_remotes_from_secrets
+    Dir.mktmpdir do |dir|
+      write_backup_config(dir, secret_named_config_yaml)
+
+      config = KamalBackup::Config.new(
+        env: {
+          'BACKUP_APP_NAME' => 'posts',
+          'BACKUP_S3_ACCESS_KEY_ID' => 'AKIAEXAMPLE',
+          'BACKUP_S3_SECRET_ACCESS_KEY' => 's3-secret',
+          'BACKUP_R2_ENDPOINT' => 'https://account.r2.cloudflarestorage.com'
+        },
+        cwd: dir,
+        load_project_defaults: false
+      )
+
+      assert_equal 'posts', config.app_name
+      assert_equal 'AKIAEXAMPLE', config.value('AWS_ACCESS_KEY_ID')
+      assert_equal 's3-secret', config.value('AWS_SECRET_ACCESS_KEY')
+      assert_equal 'eu-central-1', config.value('AWS_DEFAULT_REGION')
+      assert_equal 's3', config.value('RCLONE_CONFIG_R2_TYPE')
+      assert_equal 'Cloudflare', config.value('RCLONE_CONFIG_R2_PROVIDER')
+      assert_equal 'https://account.r2.cloudflarestorage.com', config.value('RCLONE_CONFIG_R2_ENDPOINT')
+      assert_equal 'AKIAEXAMPLE', config.value('RCLONE_CONFIG_S3_ACCESS_KEY_ID')
+      assert_equal 'AKIAEXAMPLE', KamalBackup::Restic.environment_for(config).fetch('AWS_ACCESS_KEY_ID')
+      config.validate_backup
+    end
+  end
+
+  def test_missing_restic_s3_secret_fails_restic_validation
+    Dir.mktmpdir do |dir|
+      write_backup_config(dir, secret_named_config_yaml)
+
+      config = KamalBackup::Config.new(
+        env: { 'BACKUP_APP_NAME' => 'posts', 'BACKUP_R2_ENDPOINT' => 'https://r2.example' },
+        cwd: dir,
+        load_project_defaults: false
+      )
+      error = assert_raises(KamalBackup::ConfigurationError) { config.validate_restic }
+
+      assert_equal 'missing secret or variable BACKUP_S3_ACCESS_KEY_ID (restic.s3.access_key_id), ' \
+                   'BACKUP_S3_SECRET_ACCESS_KEY (restic.s3.secret_access_key)', error.message
+    end
+  end
+
+  def test_missing_rclone_secret_fails_backup_validation_but_not_restic_commands
+    Dir.mktmpdir do |dir|
+      write_backup_config(dir, secret_named_config_yaml)
+
+      config = KamalBackup::Config.new(
+        env: {
+          'BACKUP_APP_NAME' => 'posts',
+          'BACKUP_S3_ACCESS_KEY_ID' => 'AKIAEXAMPLE',
+          'BACKUP_S3_SECRET_ACCESS_KEY' => 's3-secret'
+        },
+        cwd: dir,
+        load_project_defaults: false
+      )
+      config.validate_restic
+      error = assert_raises(KamalBackup::ConfigurationError) { config.validate_backup }
+
+      assert_equal 'missing secret or variable BACKUP_R2_ENDPOINT (rclone.r2.endpoint)', error.message
+    end
+  end
+
+  def test_rclone_remote_requires_type_and_rejects_bad_names
+    Dir.mktmpdir do |dir|
+      write_backup_config(dir, "rclone:\n  r2:\n    provider: Cloudflare\n")
+      error = assert_raises(KamalBackup::ConfigurationError) do
+        KamalBackup::Config.new(env: {}, cwd: dir, load_project_defaults: false)
+      end
+      assert_includes error.message, 'rclone.r2 type is required'
+
+      write_backup_config(dir, "rclone:\n  my-r2:\n    type: s3\n")
+      error = assert_raises(KamalBackup::ConfigurationError) do
+        KamalBackup::Config.new(env: {}, cwd: dir, load_project_defaults: false)
+      end
+      assert_includes error.message, 'remote name must contain only letters, digits, and _'
+    end
+  end
+
+  def test_restic_s3_rejects_unknown_keys
+    Dir.mktmpdir do |dir|
+      write_backup_config(dir, "restic:\n  s3:\n    endpoint: https://s3.example.com\n")
+      error = assert_raises(KamalBackup::ConfigurationError) do
+        KamalBackup::Config.new(env: {}, cwd: dir, load_project_defaults: false)
+      end
+      assert_includes error.message, 'restic.s3 contains unknown key "endpoint"'
+    end
+  end
+
+  def test_interpolates_environment_variables_in_scalar_values
+    Dir.mktmpdir do |dir|
+      write_backup_config(dir, <<~'YAML')
+        app: ${APP}
+        databases:
+          - name: app
+            adapter: postgres
+            url: postgres://postgres@postgres:5432/${APP}_production
+        restic:
+          repository: s3:https://s3.example.com/${APP}-db-backups/production
+          password: restic-secret
+        copies:
+          - source: r2:production
+            destination: s3:${APP}-files-backups/production
+        rclone:
+          r2:
+            type: s3
+            endpoint: ${R2_ENDPOINT}
+      YAML
+
+      config = KamalBackup::Config.new(env: { 'APP' => 'posts', 'R2_ENDPOINT' => 'https://r2.example' }, cwd: dir,
+                                       load_project_defaults: false)
+
+      assert_equal 'posts', config.app_name
+      assert_equal 'postgres://postgres@postgres:5432/posts_production', config.databases.first.value('DATABASE_URL')
+      assert_equal 's3:https://s3.example.com/posts-db-backups/production', config.restic_repository
+      assert_equal 's3:posts-files-backups/production', config.copies.first.destination
+      assert_equal 'https://r2.example', config.value('RCLONE_CONFIG_R2_ENDPOINT')
+      config.validate_backup
+    end
+  end
+
+  def test_missing_interpolated_variable_is_reported_by_the_right_validation
+    Dir.mktmpdir do |dir|
+      write_backup_config(dir, <<~'YAML')
+        app: posts
+        databases:
+          - name: app
+            adapter: postgres
+            url: postgres://postgres@postgres:5432/posts_production
+        restic:
+          repository: s3:https://s3.example.com/${APP}-db-backups
+          password: restic-secret
+        rclone:
+          r2:
+            type: s3
+            endpoint: ${R2_ENDPOINT}
+      YAML
+
+      config = KamalBackup::Config.new(env: {}, cwd: dir, load_project_defaults: false)
+      error = assert_raises(KamalBackup::ConfigurationError) { config.validate_restic }
+      assert_equal 'missing secret or variable ${APP} (restic.repository)', error.message
+
+      config = KamalBackup::Config.new(env: { 'APP' => 'posts' }, cwd: dir, load_project_defaults: false)
+      config.validate_restic
+      error = assert_raises(KamalBackup::ConfigurationError) { config.validate_backup }
+      assert_equal 'missing secret or variable ${R2_ENDPOINT} (rclone.r2.endpoint)', error.message
+    end
+  end
 end

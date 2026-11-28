@@ -1506,6 +1506,108 @@ class AppTest < Minitest::Test
     end
   end
 
+  class FakeRclone
+    attr_reader :copy_calls
+
+    def initialize(events = [])
+      @copy_calls = []
+      @events = events
+    end
+
+    def copy(source, destination)
+      @events << :copy
+      @copy_calls << { source: source, destination: destination }
+    end
+  end
+
+  def copies_config(dir, env)
+    config_dir = File.join(dir, 'config')
+    FileUtils.mkdir_p(config_dir)
+    File.write(
+      File.join(config_dir, 'kamal-backup.yml'),
+      <<~YAML
+        app: copies-app
+        databases:
+          - name: app
+            adapter: postgres
+            url: postgres://app@postgres:5432/app_production
+        restic:
+          repository: /tmp/restic-repo
+          password: restic-secret
+        copies:
+          - source: r2:production
+            destination: s3:app-files-backups/production
+          - source: r2:uploads
+            destination: s3:app-files-backups/uploads
+      YAML
+    )
+    KamalBackup::Config.new(env: env.merge('KAMAL_BACKUP_STATE_DIR' => File.join(dir, 'state')), cwd: dir,
+                            load_project_defaults: false)
+  end
+
+  def test_backup_runs_configured_copies_after_restic_and_records_them
+    Dir.mktmpdir do |dir|
+      events = []
+      restic = FakeRestic.new
+      restic.define_singleton_method(:prune) do
+        events << :prune
+        []
+      end
+      database = FakeDatabase.new(adapter_name: 'postgres')
+      database.define_singleton_method(:backup) { |_restic| events << :database }
+      rclone = FakeRclone.new(events)
+
+      app = KamalBackup::App.new(config: copies_config(dir, {}), restic: restic, database: database, rclone: rclone)
+      result = app.backup(force: true)
+
+      assert_equal %i[database prune copy copy], events
+      assert_equal [
+        { source: 'r2:production', destination: 's3:app-files-backups/production' },
+        { source: 'r2:uploads', destination: 's3:app-files-backups/uploads' }
+      ], rclone.copy_calls
+      assert_equal(%w[r2:production r2:uploads], result.fetch(:copies).map { |copy| copy.fetch(:source) })
+      saved = JSON.parse(File.read(app.config.last_backup_path))
+      assert_equal 's3:app-files-backups/uploads', saved.fetch('copies').last.fetch('destination')
+    end
+  end
+
+  def test_failed_copy_fails_the_backup_without_recording_it
+    Dir.mktmpdir do |dir|
+      restic = FakeRestic.new
+      database = FakeDatabase.new(adapter_name: 'postgres')
+      rclone = FakeRclone.new
+      rclone.define_singleton_method(:copy) do |_source, _destination|
+        raise KamalBackup::CommandError.new('command failed (1): rclone copy', command: nil, status: 1,
+                                                                               stderr: 'AccessDenied')
+      end
+
+      app = KamalBackup::App.new(config: copies_config(dir, {}), restic: restic, database: database, rclone: rclone)
+      error = assert_raises(KamalBackup::CommandError) { app.backup(force: true) }
+
+      assert_equal 'copy failed for r2:production -> s3:app-files-backups/production: command failed (1): rclone copy',
+                   error.message
+      assert_equal 'AccessDenied', error.stderr
+      assert_equal 1, database.backup_calls.size
+      refute_path_exists app.config.last_backup_path
+    end
+  end
+
+  def test_backup_requires_rclone_before_touching_the_repository_when_copies_are_configured
+    Dir.mktmpdir do |dir|
+      restic = FakeRestic.new
+      database = FakeDatabase.new(adapter_name: 'postgres')
+      app = KamalBackup::App.new(config: copies_config(dir, {}), restic: restic, database: database)
+
+      KamalBackup::Command.stub(:available?, ->(name) { name != 'rclone' }) do
+        error = assert_raises(KamalBackup::ConfigurationError) { app.backup(force: true) }
+        assert_includes error.message, 'rclone is required on PATH'
+      end
+
+      assert_equal 0, restic.ensure_repository_calls
+      assert_empty database.backup_calls
+    end
+  end
+
   private
 
   def two_backup_runs

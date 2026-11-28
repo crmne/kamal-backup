@@ -6,19 +6,21 @@ require_relative 'databases/base'
 
 module KamalBackup
   ConfigData = Struct.new(:env, :database_definitions, :path_definitions, :restore_from_definitions,
-                          keyword_init: true) do
+                          :copy_definitions, :missing_secrets, keyword_init: true) do
     def self.empty
-      new(env: {}, database_definitions: nil, path_definitions: nil, restore_from_definitions: nil)
+      new(env: {}, database_definitions: nil, path_definitions: nil, restore_from_definitions: nil,
+          copy_definitions: nil, missing_secrets: { 'restic' => [], 'rclone' => [] })
     end
   end
 
   PathDefinition = Struct.new(:path, :exclude, keyword_init: true)
+  CopyDefinition = Struct.new(:source, :destination, :missing_secrets, keyword_init: true)
 
   # Parses one config/kamal-backup.yml into ConfigData. Parsed values resolve
   # to the same env keys the backup accessory receives, so process ENV always
   # wins over file config through a single merge in Config.
   class ConfigFile
-    TOP_LEVEL_KEYS = %w[app accessory databases paths restore_from restic backup state].freeze
+    TOP_LEVEL_KEYS = %w[app accessory databases paths restore_from copies rclone restic backup state].freeze
     LEGACY_KEYS = %w[
       app_name
       database_adapter
@@ -48,9 +50,12 @@ module KamalBackup
       mysql_pwd
     ].freeze
 
+    VARIABLE_PATTERN = /\$\{([A-Za-z_][A-Za-z0-9_]*)\}/
+
     def initialize(path, env:)
       @path = path
       @env = env
+      @missing_variables = []
     end
 
     def data
@@ -59,11 +64,12 @@ module KamalBackup
 
       raise ConfigurationError, "#{@path} must contain a YAML mapping" unless raw.is_a?(Hash)
 
-      raw.each_with_object(ConfigData.empty) do |(raw_key, raw_value), result|
+      result = raw.each_with_object(ConfigData.empty) do |(raw_key, raw_value), data|
         key = raw_key.to_s
         validate_top_level_key!(key)
-        apply(result, key, raw_value)
+        apply(data, key, raw_value)
       end
+      record_missing_variables(result)
     rescue Psych::SyntaxError => e
       raise ConfigurationError, "invalid YAML in #{@path}: #{e.message}"
     end
@@ -73,7 +79,7 @@ module KamalBackup
     def apply(result, key, raw_value)
       case key
       when 'app'
-        result.env['APP_NAME'] = normalize_value(raw_value)
+        result.env['APP_NAME'] = resolve_value(raw_value, context: "#{@path} app")
       when 'accessory'
         result.env['KAMAL_BACKUP_ACCESSORY'] = normalize_value(raw_value)
       when 'databases'
@@ -82,8 +88,12 @@ module KamalBackup
         result.path_definitions = backup_path_definitions(raw_value, "#{@path} paths")
       when 'restore_from'
         result.restore_from_definitions = path_list(raw_value, "#{@path} restore_from")
+      when 'copies'
+        result.copy_definitions = copy_definitions(raw_value)
+      when 'rclone'
+        result.env.merge!(rclone_env(raw_value, result.missing_secrets.fetch('rclone')))
       when 'restic'
-        result.env.merge!(restic_env(raw_value))
+        result.env.merge!(restic_env(raw_value, result.missing_secrets.fetch('restic')))
       when 'backup'
         result.env.merge!(backup_env(raw_value))
       when 'state'
@@ -186,6 +196,32 @@ module KamalBackup
       end
     end
 
+    def copy_definitions(raw_value)
+      return [] if raw_value.nil?
+
+      entries = require_array(raw_value, "#{@path} copies")
+      entries.map.with_index(1) do |entry, index|
+        context = "#{@path} copies[#{index}]"
+        hash = require_mapping(entry, context)
+        unknown_keys = hash.keys - %w[source destination]
+        unless unknown_keys.empty?
+          raise ConfigurationError,
+                "#{context} contains unknown key #{unknown_keys.first.inspect}; expected source and destination"
+        end
+
+        missing_secrets = []
+        values = %w[source destination].to_h do |key|
+          raise ConfigurationError, "#{context} #{key} is required" unless hash.key?(key)
+
+          missing_secrets.concat(missing_secrets_for(hash[key]))
+          [key, resolve_value(hash[key], context: "#{context}.#{key}")]
+        end
+
+        CopyDefinition.new(source: values['source'], destination: values['destination'],
+                           missing_secrets: missing_secrets)
+      end
+    end
+
     def path_list(raw_value, context)
       case raw_value
       when Array
@@ -203,7 +239,7 @@ module KamalBackup
       normalize_value(raw_value)
     end
 
-    def restic_env(raw_value)
+    def restic_env(raw_value, missing_secrets)
       hash = require_mapping(raw_value, "#{@path} restic")
       env = {}
 
@@ -211,6 +247,7 @@ module KamalBackup
       env['RESTIC_REPOSITORY_FILE'] = normalize_value(hash['repository_file']) if hash.key?('repository_file')
       env.merge!(restic_password_env(hash['password'])) if hash.key?('password')
       env.merge!(restic_rest_env(hash['rest'])) if hash.key?('rest')
+      env.merge!(restic_s3_env(hash['s3'], missing_secrets)) if hash.key?('s3')
 
       {
         'init_if_missing' => 'RESTIC_INIT_IF_MISSING',
@@ -251,6 +288,49 @@ module KamalBackup
       env['RESTIC_REST_USERNAME'] = resolve_value(username, context: "#{@path} restic.rest.username") if username
       env['RESTIC_REST_PASSWORD'] = resolve_value(hash['password'], context: "#{@path} restic.rest.password") if hash.key?('password')
       env.compact
+    end
+
+    RESTIC_S3_KEYS = {
+      'access_key_id' => 'AWS_ACCESS_KEY_ID',
+      'secret_access_key' => 'AWS_SECRET_ACCESS_KEY',
+      'region' => 'AWS_DEFAULT_REGION'
+    }.freeze
+
+    # S3 credentials for an s3: restic repository, so they can be named in YAML
+    # instead of passing AWS_* variables to the accessory.
+    def restic_s3_env(raw_value, missing_secrets)
+      context = "#{@path} restic.s3"
+      hash = require_mapping(raw_value, context)
+      unknown_keys = hash.keys - RESTIC_S3_KEYS.keys
+      unless unknown_keys.empty?
+        raise ConfigurationError,
+              "#{context} contains unknown key #{unknown_keys.first.inspect}; expected #{RESTIC_S3_KEYS.keys.join(', ')}"
+      end
+
+      hash.each_with_object({}) do |(key, value), env|
+        missing_secrets.concat(missing_secrets_for(value).map { |name| "#{name} (restic.s3.#{key})" })
+        env[RESTIC_S3_KEYS.fetch(key)] = resolve_value(value, context: "#{context}.#{key}")
+      end.compact
+    end
+
+    # rclone remotes used by copies, as RCLONE_CONFIG_<REMOTE>_<OPTION> variables.
+    def rclone_env(raw_value, missing_secrets)
+      remotes = require_mapping(raw_value, "#{@path} rclone")
+      remotes.each_with_object({}) do |(name, options), env|
+        context = "#{@path} rclone.#{name}"
+        raise ConfigurationError, "#{context} remote name must contain only letters, digits, and _" unless name.match?(/\A[A-Za-z0-9_]+\z/)
+
+        options = require_mapping(options, context)
+        raise ConfigurationError, "#{context} type is required" if normalize_value(options['type']).to_s.empty?
+
+        options.each do |option, value|
+          raise ConfigurationError, "#{context} option #{option.inspect} must contain only letters, digits, and _" unless option.match?(/\A[A-Za-z0-9_]+\z/)
+
+          missing_secrets.concat(missing_secrets_for(value).map { |secret| "#{secret} (rclone.#{name}.#{option})" })
+          resolved = resolve_value(value, context: "#{context}.#{option}")
+          env["RCLONE_CONFIG_#{name.upcase}_#{option.upcase}"] = resolved unless resolved.nil?
+        end
+      end
     end
 
     def retention_env(raw_value)
@@ -311,8 +391,31 @@ module KamalBackup
         secret_name = normalize_value(hash.fetch('secret'))
         @env[secret_name]
       else
-        normalize_value(raw_value)
+        interpolate(normalize_value(raw_value), context: context)
       end
+    end
+
+    # Replaces ${NAME} in scalar values with the environment variable NAME.
+    # A missing variable becomes empty and is reported by validation, so
+    # commands that do not need that value keep working.
+    def interpolate(value, context:)
+      return value unless value.is_a?(String) && value.include?('${')
+
+      value.gsub(VARIABLE_PATTERN) do
+        name = ::Regexp.last_match(1)
+        resolved = @env[name].to_s
+        @missing_variables << [name, context] if resolved.strip.empty?
+        resolved
+      end
+    end
+
+    def record_missing_variables(result)
+      @missing_variables.each do |name, context|
+        label = context.delete_prefix("#{@path} ")
+        group = label.start_with?('rclone', 'copies') ? 'rclone' : 'restic'
+        result.missing_secrets.fetch(group) << "${#{name}} (#{label})"
+      end
+      result
     end
 
     def missing_secrets_for(raw_value)

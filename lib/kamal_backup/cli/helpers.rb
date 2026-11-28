@@ -260,6 +260,10 @@ module KamalBackup
         if (files = result[:files])
           puts("files: #{files.fetch(:snapshot)} at #{files.fetch(:time)}")
         end
+
+        Array(result[:copies]).each do |copy|
+          puts("copy: #{copy.fetch(:source)} -> #{copy.fetch(:destination)} at #{copy.fetch(:finished_at)}")
+        end
       end
 
       def print_prune_result(results)

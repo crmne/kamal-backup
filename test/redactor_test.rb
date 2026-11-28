@@ -135,4 +135,12 @@ class RedactorTest < Minitest::Test
     assert_includes value, 'password=[REDACTED]'
     assert_includes value, 'name=app'
   end
+
+  def test_redacts_rclone_connection_string_credentials
+    redactor = KamalBackup::Redactor.new(env: {})
+
+    value = redactor.redact_string(':s3,provider=AWS,access_key_id=AKIA123,secret_access_key="a,b":bucket/path')
+
+    assert_equal ':s3,provider=AWS,access_key_id=[REDACTED],secret_access_key=[REDACTED]:bucket/path', value
+  end
 end

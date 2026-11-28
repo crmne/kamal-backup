@@ -43,14 +43,31 @@ File backups are opt-in. `kamal-backup` snapshots files only when `paths` is exp
 
 `kamal-backup.yml` uses the grouped shape shown above. Older flat YAML keys such as `database_adapter`, `backup_paths`, and `restic_repository` are rejected so configuration stays explicit. See [Upgrading](/upgrading/) when moving from 0.2.
 
+## Environment variables in values
+
+Any scalar value can include `${NAME}`, which is replaced with the environment variable `NAME` inside the accessory.
+This lets one file serve many apps:
+
+```yaml
+restic:
+  repository: s3:https://s3.example.com/${BACKUP_APP_NAME}-db-backups/production
+```
+{: data-title="config/kamal-backup.yml"}
+
+A variable that is not set is reported by `kamal-backup validate` and before a backup. Use `{ secret: NAME }` when the
+whole value is a secret.
+
 ## Default options
 
 - `accessory`: the Kamal accessory name. The default is `backup`.
-- `app`: the app tag used on restic snapshots.
+- `app`: the app tag used on restic snapshots. It can also be `{ secret: NAME }`.
 - `databases`: one or more PostgreSQL, MySQL/MariaDB, or SQLite databases to back up.
 - `paths`: optional filesystem paths to snapshot from mounted volumes. Entries can be strings or mappings with `path` and `exclude`. No files are backed up when this is omitted or empty.
+- `copies`: optional rclone copies from one bucket to another, such as Cloudflare R2 to AWS S3. See [Copy object storage buckets](#copy-object-storage-buckets).
+- `rclone`: rclone remotes used by `copies`, one mapping of options per remote.
 - `restic.repository`: the restic repository location, such as S3-compatible storage, SFTP, rclone, a restic REST server, or a filesystem path.
 - `restic.password.secret`: the Kamal secret env var that contains the restic password.
+- `restic.s3.access_key_id`, `restic.s3.secret_access_key` and `restic.s3.region`: optional credentials for an `s3:` repository. These become `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY` and `AWS_DEFAULT_REGION`.
 - `restic.rest.username` and `restic.rest.password`: optional restic REST server credentials. These become `RESTIC_REST_USERNAME` and `RESTIC_REST_PASSWORD`.
 - `restic.init_if_missing`: run `restic init` when the repository has not been initialized yet.
 - `backup.schedule`: how often the accessory runs backups. `1d` means once per day.
@@ -225,6 +242,60 @@ using rclone's `RCLONE_CONFIG_<REMOTE>_TYPE` and backend-specific variables; `ka
 Restic starts and stops `rclone serve restic --stdio` itself—do not run a separate rclone daemon. See restic's
 [rclone backend documentation](https://restic.readthedocs.io/en/v0.18.1/030_preparing_a_new_repo.html#other-services-via-rclone)
 and the official [rclone backend announcement](https://restic.net/blog/2018-04-01/rclone-backend/).
+
+## Copy object storage buckets
+
+Active Storage on S3-compatible storage, such as Cloudflare R2, has no files on a volume for `paths` to snapshot.
+Use `copies` to copy a bucket to a second bucket with `rclone copy` on every backup run:
+
+```yaml
+copies:
+  - source: r2:your-app-production
+    destination: s3:your-app-files-backups/production
+```
+{: data-title="config/kamal-backup.yml"}
+
+`source` and `destination` are rclone paths (`remote:bucket/path`). Either one can also be `{ secret: NAME }`, so each
+Kamal destination can pass its own bucket names. Define the remotes under `rclone`; every option becomes
+`RCLONE_CONFIG_<REMOTE>_<OPTION>` for rclone, and values can be literals or secrets:
+
+```yaml
+rclone:
+  r2:
+    type: s3
+    provider: Cloudflare
+    region: auto
+    endpoint:
+      secret: R2_ENDPOINT
+    access_key_id:
+      secret: R2_ACCESS_KEY_ID
+    secret_access_key:
+      secret: R2_SECRET_ACCESS_KEY
+  s3:
+    type: s3
+    provider: AWS
+    region: eu-central-1
+    endpoint: https://s3.eu-central-1.amazonaws.com
+    access_key_id:
+      secret: S3_ACCESS_KEY_ID
+    secret_access_key:
+      secret: S3_SECRET_ACCESS_KEY
+```
+{: data-title="config/kamal-backup.yml"}
+
+`RCLONE_CONFIG_*` variables passed to the accessory directly still work and take precedence.
+
+Copies run after the database and file snapshots, retention, and the optional check. A failed copy fails the backup run,
+so the run is not recorded and the next scheduled run tries again. `rclone copy` adds and updates objects but never
+deletes them from the destination; enable versioning and a lifecycle rule on the destination bucket to keep and expire
+old versions.
+
+Copies are not stored in the restic repository: they are plain objects in the destination bucket, and `restore` and
+`drill` do not touch them. To restore, copy the other way:
+
+```sh
+bin/kamal accessory exec backup --reuse "rclone copy s3:your-app-files-backups/production r2:your-app-production"
+```
 
 ## SFTP repositories
 

@@ -11,6 +11,7 @@ require_relative 'databases/mysql'
 require_relative 'databases/postgres'
 require_relative 'databases/sqlite'
 require_relative 'evidence'
+require_relative 'rclone'
 require_relative 'redactor'
 require_relative 'restic'
 require_relative 'scheduler'
@@ -22,11 +23,12 @@ module KamalBackup
 
     attr_reader :config, :redactor
 
-    def initialize(env: ENV, config: nil, redactor: nil, restic: nil, database: nil)
+    def initialize(env: ENV, config: nil, redactor: nil, restic: nil, database: nil, rclone: nil)
       @config = config || Config.new(env: env)
       @redactor = redactor || Redactor.new(env: @config.env)
       @restic = restic
       @database = database
+      @rclone = rclone
     end
 
     def backup(force: false)
@@ -35,6 +37,7 @@ module KamalBackup
       return disabled_backup_result(started_at) unless config.backup_enabled? || force
       return skipped_backup_result(started_at) unless force || backup_due?(started_at)
 
+      rclone if config.copies.any?
       restic.ensure_repository
       databases.each { |database| backup_database(database) }
       restic.backup_paths(config.backup_paths, tags: ['type:files'])
@@ -43,7 +46,9 @@ module KamalBackup
 
       restic.check if config.check_after_backup?
 
-      backup_summary(started_at: started_at, finished_at: Time.now.utc).tap do |summary|
+      copies = config.copies.map { |copy| run_copy(copy) }
+
+      backup_summary(started_at: started_at, finished_at: Time.now.utc, copies: copies).tap do |summary|
         validate_fresh_backup_summary!(summary, started_at: started_at)
         write_last_backup(summary)
       end
@@ -222,6 +227,26 @@ module KamalBackup
       )
     end
 
+    def run_copy(copy)
+      copy_started_at = Time.now.utc
+      rclone.copy(copy.source, copy.destination)
+      {
+        source: redactor.redact_string(copy.source),
+        destination: redactor.redact_string(copy.destination),
+        started_at: copy_started_at.iso8601,
+        finished_at: Time.now.utc.iso8601
+      }
+    rescue CommandError => e
+      raise CommandError.new(
+        "copy failed for #{redactor.redact_string(copy.source)} -> #{redactor.redact_string(copy.destination)}: " \
+        "#{e.message}",
+        command: e.command,
+        status: e.status,
+        stdout: e.stdout,
+        stderr: e.stderr
+      )
+    end
+
     def backup_due?(now)
       due_at = next_backup_at
       due_at.nil? || now >= due_at
@@ -272,14 +297,15 @@ module KamalBackup
       end
     end
 
-    def backup_summary(started_at:, finished_at:)
+    def backup_summary(started_at:, finished_at:, copies:)
       Schema.record(
         kind: 'backup_result',
         status: 'ok',
         started_at: started_at.iso8601,
         finished_at: finished_at.iso8601,
         databases: databases.map { |adapter| backup_snapshot_summary(adapter) },
-        files: backup_file_snapshot_summary
+        files: backup_file_snapshot_summary,
+        copies: copies
       )
     end
 
@@ -603,6 +629,17 @@ module KamalBackup
         end
 
         Restic.new(config, redactor: redactor)
+      end
+    end
+
+    def rclone
+      @rclone ||= begin
+        unless Command.available?('rclone')
+          raise ConfigurationError,
+                'rclone is required on PATH to run configured copies. Use the kamal-backup image or install rclone.'
+        end
+
+        Rclone.new(config, redactor: redactor)
       end
     end
 

@@ -24,6 +24,10 @@ module KamalBackup
         end,
         restic_repository: @redactor.redact_string(@config.restic_repository.to_s),
         paths: @config.backup_paths,
+        copies: @config.copies.map do |copy|
+          { source: @redactor.redact_string(copy.source), destination: @redactor.redact_string(copy.destination) }
+        end,
+        last_backup_copies: last_backup_copies,
         forget_after_backup: @config.forget_after_backup?,
         retention: @config.retention,
         latest_database_backups: latest_database_backups,
@@ -63,6 +67,14 @@ module KamalBackup
                                                                     "adapter:#{database.database_adapter}"
                                                                   ])
       end
+    end
+
+    def last_backup_copies
+      return nil unless File.file?(@config.last_backup_path)
+
+      JSON.parse(File.read(@config.last_backup_path))['copies']
+    rescue JSON::ParserError, SystemCallError => e
+      { error: @redactor.redact_string(e.message) }
     end
 
     def last_check

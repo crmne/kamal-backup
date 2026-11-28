@@ -54,7 +54,12 @@ module KamalBackup
         "#{::Regexp.last_match(1)}#{REDACTED}@"
       end
 
-      redacted.gsub(/([?&](?:password|token|secret|key|access_key_id|secret_access_key)=)[^&\s]+/i) do
+      redacted = redacted.gsub(/([?&](?:password|token|secret|key|access_key_id|secret_access_key)=)[^&\s]+/i) do
+        "#{::Regexp.last_match(1)}#{REDACTED}"
+      end
+
+      # rclone connection strings: :s3,access_key_id=...,secret_access_key=...:bucket
+      redacted.gsub(/(,[a-z_]*(?:pass|token|secret|key)[a-z_]*=)("[^"]*"|'[^']*'|[^,:\s]+)/i) do
         "#{::Regexp.last_match(1)}#{REDACTED}"
       end
     end
